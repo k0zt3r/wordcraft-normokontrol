@@ -8,12 +8,66 @@ from tkinter import filedialog, messagebox, ttk
 from irgups_data import UNIVERSITY_FULL, UNIVERSITY_SHORT, DIRECTORY, WORK_TYPES, DOCUMENT_CODES, unit_code, generate_number
 
 
+def install_edit_shortcuts(root):
+    """Windows keycodes stay stable when the active keyboard layout is Russian."""
+    actions = {65: '<<SelectAll>>', 67: '<<Copy>>', 86: '<<Paste>>', 88: '<<Cut>>', 90: '<<Undo>>'}
+    editable = ('Entry', 'TEntry', 'Text', 'TCombobox', 'Spinbox', 'TSpinbox')
+
+    def invoke(widget, action):
+        if action == '<<SelectAll>>':
+            if widget.winfo_class() == 'Text':
+                widget.tag_add('sel', '1.0', 'end-1c')
+            else:
+                widget.selection_range(0, 'end')
+            return
+        try:
+            widget.event_generate(action)
+        except tk.TclError:
+            pass  # Empty undo stack or unsupported action.
+
+    def shortcut(event):
+        action = actions.get(event.keycode) if os.name == 'nt' else None
+        if action and event.state & 4 and not event.state & 8:
+            invoke(event.widget, action)
+            return 'break'
+
+    menu = tk.Menu(root, tearoff=False)
+    def popup(event):
+        widget = event.widget
+        widget.focus_set()
+        menu.delete(0, 'end')
+        for label, action in [('Копировать', '<<Copy>>'), ('Вставить', '<<Paste>>'),
+                              ('Вырезать', '<<Cut>>'), ('Выделить всё', '<<SelectAll>>')]:
+            menu.add_command(label=label, command=lambda a=action: invoke(widget, a))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return 'break'
+
+    # Run before widget class bindings to prevent a second paste on Latin layouts.
+    root.bind_class('NormokontrolEdit', '<KeyPress>', shortcut)
+    root.bind_class('NormokontrolEdit', '<Button-3>', popup)
+    def attach(widget):
+        if widget.winfo_class() in editable:
+            widget.bindtags(('NormokontrolEdit',) + widget.bindtags())
+        for child in widget.winfo_children():
+            attach(child)
+    attach(root)
+
+
 def show(process, create_document, initial=None):
     root = tk.Tk()
     root.title("Нормоконтроль ИрГУПС · Wordcraft")
     root.geometry("980x800")
     root.minsize(920, 740)
     root.option_add("*Font", "{Segoe UI} 10")
+    style = ttk.Style(root)
+    if 'vista' in style.theme_names():
+        style.theme_use('vista')
+    style.configure('TButton', padding=(12, 7))
+    style.configure('TNotebook.Tab', padding=(14, 8))
+    style.configure('Title.TLabel', font=('Segoe UI', 17, 'bold'))
     pane = ttk.Frame(root, padding=20)
     pane.pack(fill="both", expand=True)
     source = tk.StringVar(value=str(initial or ""))
@@ -44,7 +98,7 @@ def show(process, create_document, initial=None):
     def blank():
         new.set(True)
         source.set("Новый документ — титульник и выбранные заготовки")
-    ttk.Label(pane, text="Документ").grid(row=0, column=0, sticky="w")
+    ttk.Label(pane, text="Нормоконтроль ИрГУПС", style='Title.TLabel').grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Entry(pane, textvariable=source).grid(row=1, column=0, sticky="ew", pady=(4, 12))
     ttk.Button(pane, text="Выбрать…", command=browse).grid(row=1, column=1, padx=8, pady=(4, 12))
     ttk.Button(pane, text="Новый документ", command=blank).grid(row=1, column=2, pady=(4, 12))
@@ -212,4 +266,5 @@ def show(process, create_document, initial=None):
             pass
         root.after(150, poll)
     root.after(150, poll)
+    install_edit_shortcuts(root)
     root.mainloop()

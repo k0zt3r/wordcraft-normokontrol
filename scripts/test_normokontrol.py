@@ -28,6 +28,27 @@ class NormokontrolTests(unittest.TestCase):
         self.assertEqual(meta['university'],UNIVERSITY_NAME)
         self.assertEqual(meta['university_short'],UNIVERSITY_SHORT)
     def test_references_and_ranges(self):
+        self.assertTrue(nk.reference_exists('На рисунке Б.1 показано устройство.', 'Рисунок', 'Б.1'))
+        self.assertTrue(nk.reference_exists('На рисунках Б.2–Б.5.', 'Рисунок', 'Б.3'))
+        self.assertTrue(nk.reference_exists('См. рис. Б.1.', 'Рисунок', 'Б.1'))
+        self.assertFalse(nk.reference_exists('См. рисунок Б.10.', 'Рисунок', 'Б.1'))
+        self.assertEqual(nk.norm('\ufffc\f\ufffcВведение'), 'введение')
+
+    def test_contents_with_merged_header_and_continuation(self):
+        def para(text):
+            return {'kind': 'para', 'text': text}
+        def row(*texts):
+            return {'cells': [{'blocks': [para(t)]} for t in texts]}
+        body = [para('\ufffc'), {'kind': 'table', 'rows': [row('Содержание'), row('', '', 'Введение', '4')]},
+                para('\f'), {'kind': 'table', 'rows': [row('', 'Заключение', '53')]},
+                para('\ufffc\fВведение'), {'kind': 'table', 'rows': [row('Данные', '1')]}]
+        self.assertEqual(nk.detect_tocs(body), [1, 3])
+        self.assertEqual(nk.body_start({'body': body}), 1)
+        before = nk.stable_text({'body': body}, 1)
+        body[3]['rows'][0]['cells'][-1]['blocks'][0]['text'] = '54'
+        self.assertEqual(nk.stable_text({'body': body}, 1), before)
+        body[1]['rows'][0]['cells'][0]['blocks'][0]['text'] = 'Удалённый заголовок'
+        self.assertNotEqual(nk.stable_text({'body': body}, 1), before)
         self.assertTrue(nk.reference_exists("На рисунке 2.18: опыт.", "Рисунок", "2.18"))
         self.assertTrue(nk.reference_exists("На рисунках 2.7–2.9.", "Рисунок", "2.8"))
         self.assertTrue(nk.reference_exists("См. таблицу 1.1.", "Таблица", "1.1"))

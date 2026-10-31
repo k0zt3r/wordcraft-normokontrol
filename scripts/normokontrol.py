@@ -41,7 +41,7 @@ CAPTION = re.compile(r"^(Таблица|Рисунок)\s+([А-ЯA-Z\d]+(?:\.\d+
 
 
 def norm(text):
-    return re.sub(r"\s+", " ", text.replace("\u00a0", " ")).strip().casefold()
+    return re.sub(r"\s+", " ", text.replace("\ufffc", "").replace("\u00a0", " ")).strip().casefold()
 
 
 def byte_len(text):
@@ -216,13 +216,25 @@ def next_block(body, index):
 
 
 def detect_toc(body):
+    return next(iter(detect_tocs(body)), None)
+
+
+def detect_tocs(body):
+    found = []
+    active = False
     for i, block in enumerate(body):
-        if block["kind"] == "para" and norm(block.get("text", "")) == "содержание":
-            index, table = next_block(body, i)
-            if table and table["kind"] == "table" and table.get("rows"):
-                if all(len(row["cells"]) in (2, 4) for row in table["rows"]):
-                    return index
-    return None
+        if block["kind"] == "para":
+            text = norm(block.get("text", ""))
+            if text:
+                active = text == "содержание"
+        elif block["kind"] == "table":
+            texts = [norm(p.get("text", "")) for _, p in paragraphs([block])]
+            active = active or "содержание" in texts
+            if active and any(2 <= len(r["cells"]) <= 4 for r in block.get("rows", [])):
+                found.append(i)
+            else:
+                active = False
+    return found
 
 
 def table_caption(body, index):
@@ -294,7 +306,9 @@ def normalize_model(model, mode, changes):
                         pp["spaceAfter"] = 0.0
                         if data_table:
                             pp["keepNext"] = mode == "full" and ri < len(block["rows"]) - 1
-            if i == toc or (refs is not None and i > refs):
+            if i in detect_tocs(body) or (refs is not None and i > refs and not any(
+                    b["kind"] == "para" and re.fullmatch(r"приложение\s+[а-яa-z]", norm(b.get("text", "")))
+                    for b in body[refs + 1:i])):
                 edges = {edge: {"style": "none", "width": 0.0} for edge in
                          ("top", "bottom", "left", "right", "between", "insideH", "insideV")}
                 block.setdefault("props", {})["borders"] = edges
@@ -472,6 +486,8 @@ def apply_frames(model, metadata, changes, issues):
                       "marginTop": 18.15, "marginBottom": 85.05, "marginLeft": 77.95, "marginRight": 28.35})
         body[start - 1]["section"] = title
     toc_heading = next((i for i,b in enumerate(body) if b['kind']=='para' and norm(b.get('text',''))=='содержание'),None)
+    if toc_heading is None:
+        toc_heading = detect_toc(body)
     if toc_heading is not None and toc_heading > start:
         if body[toc_heading-1]['kind'] != 'para':
             body.insert(toc_heading, {'kind':'para','text':'','runs':[], 'mark':{'size':1.0}})
@@ -486,7 +502,7 @@ def apply_frames(model, metadata, changes, issues):
             continue
         w, h = (297 * MM, 210 * MM) if section.get("landscape") else (210 * MM, 297 * MM)
         small = header(w, h, False)
-        big = header(w, h, True) if section_start < len(body) and norm(body[section_start].get("text", "")) == "содержание" else small
+        big = header(w, h, True) if section_start == toc_heading else small
         section.update({"headers": {"default": small, "first": big, "even": small},
                         "footers": {"default": blank_footer, "first": blank_footer, "even": blank_footer},
                         "titlePage": True, "marginLeft": 27.5 * MM, "marginRight": 10 * MM,
@@ -584,6 +600,9 @@ def body_start(model):
     body = model["body"]
     heading = next((i for i, b in enumerate(body) if b["kind"] == "para" and
                     (norm(b.get("text", "")) in SPECIAL or heading_level(b, model.get("styles", {})))), None)
+    toc = detect_toc(body)
+    if toc is not None:
+        return min(heading, toc) if heading is not None else toc
     if heading is not None:
         return heading
     return next((i + 1 for i, b in enumerate(body[:-1]) if b.get("section")), 0)
@@ -725,10 +744,11 @@ def inventory(path):
 def stable_text(model, toc):
     # Exclude generated TOC page cells and field results; preserve everything else including duplicate text.
     result = []
+    toc_tables = set(detect_tocs(model["body"]))
     for path, para in paragraphs(model["body"]):
-        if toc is not None and path[0] == toc and len(path) > 2:
-            row = model["body"][toc]["rows"][path[1]]
-            if path[2] == len(row["cells"]) - 1:
+        if path[0] in toc_tables and len(path) > 2:
+            row = model["body"][path[0]]["rows"][path[1]]
+            if len(row["cells"]) > 1 and path[2] == len(row["cells"]) - 1:
                 continue
         if para.get("fields"):
             # Page/REF results can legitimately change. Retain a count and report it separately.
@@ -818,34 +838,37 @@ def update_toc(wc, model, issues, do_fix=True):
             heads.setdefault(norm(para["text"]), []).append(i)
     for _ in range(4):
         changed = False
-        for ri, row in enumerate(body[toc]["rows"]):
-            cells = row["cells"]
-            cell_text = [" ".join(p.get("text", "") for _, p in paragraphs(c["blocks"])) for c in cells]
-            title = norm(" ".join(cell_text[:-1]))
-            if not title:
-                continue  # Intentionally blank rows in the course's contents template.
-            candidates = heads.get(title, [])
-            if len(candidates) != 1:
-                add_issue(issues, "toc-match", f"Строка содержания не сопоставлена однозначно с заголовком: {title}")
-                continue
-            location = wc.locate([candidates[0]])
-            value = str(location["number"])
-            ps = list(paragraphs(cells[-1]["blocks"], (toc, ri, len(cells) - 1)))
-            if len(ps) != 1:
-                add_issue(issues, "toc-cell", f"Сложная ячейка номера страницы в содержании: {title}")
-                continue
-            path, para = ps[0]
-            old = para.get("text", "")
-            if old != value:
-                if do_fix:
-                    start = {"story": "body", "path": path, "off": 0}
-                    end = {"story": "body", "path": path, "off": byte_len(old)}
-                    wc.batch([{"command": "select.range", "params": {"anchor": start, "focus": end}},
-                              {"command": "text.insert", "params": {"text": value, "raw": True}}])
-                    para["text"] = value
-                    changed = True
-                else:
-                    add_issue(issues, "toc-page", f"Содержание: «{title}» — указано {old}, фактически {value}.")
+        for toc in detect_tocs(body):
+            for ri, row in enumerate(body[toc]["rows"]):
+                cells = row["cells"]
+                if len(cells) < 2:
+                    continue
+                cell_text = [" ".join(p.get("text", "") for _, p in paragraphs(c["blocks"])) for c in cells]
+                title = norm(" ".join(cell_text[:-1]))
+                if not title:
+                    continue  # Intentionally blank rows in the course's contents template.
+                candidates = heads.get(title, [])
+                if len(candidates) != 1:
+                    add_issue(issues, "toc-match", f"Строка содержания не сопоставлена однозначно с заголовком: {title}")
+                    continue
+                location = wc.locate([candidates[0]])
+                value = str(location["number"])
+                ps = list(paragraphs(cells[-1]["blocks"], (toc, ri, len(cells) - 1)))
+                if len(ps) != 1:
+                    add_issue(issues, "toc-cell", f"Сложная ячейка номера страницы в содержании: {title}")
+                    continue
+                path, para = ps[0]
+                old = para.get("text", "")
+                if old != value:
+                    if do_fix:
+                        start = {"story": "body", "path": path, "off": 0}
+                        end = {"story": "body", "path": path, "off": byte_len(old)}
+                        wc.batch([{"command": "select.range", "params": {"anchor": start, "focus": end}},
+                                  {"command": "text.insert", "params": {"text": value, "raw": True}}])
+                        para["text"] = value
+                        changed = True
+                    else:
+                        add_issue(issues, "toc-page", f"Содержание: «{title}» — указано {old}, фактически {value}.")
         if not changed:
             return
     add_issue(issues, "toc-convergence", "Содержание не стабилизировалось за четыре пересчёта; проверьте страницы вручную.")
@@ -868,7 +891,7 @@ def structural_checks(wc, model, mode, issues):
                 add_issue(issues, "bibliography-table", "Список источников не оформлен таблицей без границ.")
     if mode == "full":
         layout = wc.execute("document.layout")
-        if body_start(model) and sum(p["section"] == 0 for p in layout["pages"]) > 1:
+        if body_start(model) and wc.locate([body_start(model)])["page"] > 2:
             add_issue(issues, "title-pages", "Титульный лист занимает больше одной страницы: сократите длинные реквизиты или интервалы.")
         text=' '.join(b.get('text','') for b in body)
         if re.search(r'(?:ДП|ДР|МД)\.\d{6}\.',text) and len(layout['pages'])>100:
@@ -895,7 +918,9 @@ def structural_checks(wc, model, mode, issues):
         match = CAPTION.match(text)
         if match:
             number = match.group(2)
-            other = " ".join(b.get("text", "") for j, b in enumerate(body) if j != i and b["kind"] == "para")
+            other = "\n".join(b.get("text", "") for path, b in paragraphs(body)
+                              if path != (i,) and path[0] not in detect_tocs(body)
+                              and not CAPTION.match(b.get("text", "")))
             if not reference_exists(other, match.group(1), number):
                 add_issue(issues, "reference", f"Не найдена текстовая ссылка: {match.group(1)} {number}.")
         if heading_level(p, model.get("styles", {})) and text.rstrip().endswith("."):
@@ -932,17 +957,19 @@ def structural_checks(wc, model, mode, issues):
 
 
 def reference_exists(text, kind, number):
-    stem = r"рисун(?:ок|к\w*)" if kind.casefold() == "рисунок" else r"таблиц\w*"
+    stem = r"(?:рисун(?:ок|к\w*)|рис\.)" if kind.casefold() == "рисунок" else r"(?:таблиц\w*|табл\.)"
+    token = r"(?:[а-яa-z]\.)?\d+(?:\.\d+)*"
+    number = norm(number)
     target = tuple(number.split("."))
-    for match in re.finditer(stem + r"\s+(\d+(?:\.\d+)*(?:\s*(?:[–—-]|,|и)\s*\d+(?:\.\d+)*)*)", text, re.I):
+    for match in re.finditer(r"(?<!\w)" + stem + r"\s+(" + token + r"(?:\s*(?:[–—-]|,|и)\s*" + token + r")*)(?![\w.]*\d)", norm(text), re.I):
         phrase = match.group(1)
-        numbers = re.findall(r"\d+(?:\.\d+)*", phrase)
+        numbers = re.findall(token, phrase)
         if number in numbers:
             return True
-        for left, right in re.findall(r"(\d+(?:\.\d+)*)\s*[–—-]\s*(\d+(?:\.\d+)*)", phrase):
+        for left, right in re.findall("(" + token + r")\s*[–—-]\s*(" + token + ")", phrase):
             lo, hi = tuple(left.split(".")), tuple(right.split("."))
             if lo[:-1] == hi[:-1] == target[:-1] and len(lo) == len(hi) == len(target):
-                if int(lo[-1]) <= int(target[-1]) <= int(hi[-1]):
+                if target[-1].isdigit() and int(lo[-1]) <= int(target[-1]) <= int(hi[-1]):
                     return True
     return False
 

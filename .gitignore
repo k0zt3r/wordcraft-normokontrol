@@ -23,3 +23,5 @@ report.json
 *_нормоконтроль_*/
 outputs/
 test-results/
+review-local/
+report (*).json
