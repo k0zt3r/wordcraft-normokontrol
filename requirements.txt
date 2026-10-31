@@ -1,0 +1,2 @@
+# PDF inspection and font-substitution checks. Wordcraft itself is installed separately.
+PyMuPDF>=2.0,<3
