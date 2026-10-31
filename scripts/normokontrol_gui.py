@@ -59,12 +59,17 @@ def install_edit_shortcuts(root):
 def show(process, create_document, initial=None):
     root = tk.Tk()
     root.title("Нормоконтроль ИрГУПС · Wordcraft")
-    root.geometry("980x800")
-    root.minsize(920, 740)
+    root.geometry("1000x760")
+    root.minsize(820, 600)
     root.option_add("*Font", "{Segoe UI} 10")
     style = ttk.Style(root)
-    if 'vista' in style.theme_names():
-        style.theme_use('vista')
+    style.theme_use('clam')
+    style.configure('.', background='#f4f6fa', foreground='#233047')
+    style.configure('TEntry', fieldbackground='white', padding=6)
+    style.configure('TCombobox', fieldbackground='white', padding=5)
+    style.configure('Accent.TButton', background='#245edb', foreground='white', font=('Segoe UI', 11, 'bold'))
+    style.map('Accent.TButton', background=[('disabled', '#b5c3dd'), ('active', '#194ab5')])
+    style.configure('Subtitle.TLabel', foreground='#56657d', font=('Segoe UI', 11))
     style.configure('TButton', padding=(12, 7))
     style.configure('TNotebook.Tab', padding=(14, 8))
     style.configure('Title.TLabel', font=('Segoe UI', 17, 'bold'))
@@ -97,21 +102,43 @@ def show(process, create_document, initial=None):
             source.set(path)
     def blank():
         new.set(True)
+        check.set(False)
         source.set("Новый документ — титульник и выбранные заготовки")
     ttk.Label(pane, text="Нормоконтроль ИрГУПС", style='Title.TLabel').grid(row=0, column=0, sticky="w", pady=(0, 8))
-    ttk.Entry(pane, textvariable=source).grid(row=1, column=0, sticky="ew", pady=(4, 12))
-    ttk.Button(pane, text="Выбрать…", command=browse).grid(row=1, column=1, padx=8, pady=(4, 12))
+    ttk.Entry(pane, textvariable=source, state='readonly').grid(row=1, column=0, sticky="ew", pady=(4, 12))
+    ttk.Button(pane, text="Выбрать документ…", command=browse).grid(row=1, column=1, padx=8, pady=(4, 12))
     ttk.Button(pane, text="Новый документ", command=blank).grid(row=1, column=2, pady=(4, 12))
-    ttk.Label(pane, text="Профиль: нормоконтроль ИрГУПС · рамки и штампы · без ГОСТ-профилей", foreground="#4b5968").grid(row=2, column=0, columnspan=3, sticky="w")
-    ttk.Checkbutton(pane, text="Привести шрифт, интервалы и таблицы к нормоконтролю", variable=formatting).grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
-    ttk.Checkbutton(pane, text="Только проверить — ничего не исправлять и не добавлять", variable=check).grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 10))
+    ttk.Label(pane, text="Подготовьте работу к сдаче: оформление, рамки и проверка замечаний.", style='Subtitle.TLabel').grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 14))
     notebook = ttk.Notebook(pane)
     notebook.grid(row=5, column=0, columnspan=3, sticky="nsew")
-    title_tab, reg_tab, toc_tab, ref_tab = (ttk.Frame(notebook, padding=14) for _ in range(4))
-    notebook.add(title_tab, text="Титульник и штамп")
-    notebook.add(reg_tab, text="Регистрационный номер")
-    notebook.add(toc_tab, text="Содержание")
-    notebook.add(ref_tab, text="Список литературы")
+    def page(label):
+        outer = ttk.Frame(notebook)
+        notebook.add(outer, text=label)
+        canvas = tk.Canvas(outer, highlightthickness=0, background='#f4f6fa')
+        scroll = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        content = ttk.Frame(canvas, padding=20)
+        window = canvas.create_window((0, 0), window=content, anchor='nw')
+        content.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda e: canvas.itemconfigure(window, width=e.width))
+        return content
+    home_tab = page('Начать')
+    title_tab = page('Данные работы')
+    reg_tab = page('Шифр работы')
+    toc_tab = page('Содержание')
+    ref_tab = page('Источники')
+    ttk.Label(home_tab, text='1. Выберите документ или создайте новый', style='Title.TLabel').pack(anchor='w', pady=(0, 8))
+    ttk.Label(home_tab, text='Кнопки выбора находятся сверху. Поддерживаются файлы .docx.', wraplength=700).pack(anchor='w')
+    ttk.Label(home_tab, text='2. Что нужно сделать?', style='Title.TLabel').pack(anchor='w', pady=(24, 10))
+    ttk.Radiobutton(home_tab, text='Оформить и проверить', variable=check, value=False).pack(anchor='w', pady=5)
+    ttk.Label(home_tab, text='Добавить рамки и штампы, привести текст и таблицы к требованиям, проверить результат.', wraplength=700, style='Subtitle.TLabel').pack(anchor='w', padx=24)
+    ttk.Radiobutton(home_tab, text='Только найти замечания', variable=check, value=True).pack(anchor='w', pady=(16, 5))
+    ttk.Label(home_tab, text='Получить отчёт без исправления оформления. Подходит для готовой работы.', wraplength=700, style='Subtitle.TLabel').pack(anchor='w', padx=24)
+    ttk.Label(home_tab, text='3. Запустите обработку', style='Title.TLabel').pack(anchor='w', pady=(24, 8))
+    ttk.Label(home_tab, text='Для обычной проверки больше ничего заполнять не нужно. Данные титульника и заготовки можно указать на соседних вкладках.', wraplength=700).pack(anchor='w')
+    ttk.Checkbutton(home_tab, text='Исправлять шрифт, интервалы и оформление таблиц', variable=formatting).pack(anchor='w', pady=(20, 0))
     ttk.Label(title_tab, text="Заполните нужное. Пустое поле сохраняет исходное значение; в новом документе остаётся пустым.", wraplength=860).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 12))
     ttk.Label(title_tab, text=UNIVERSITY_FULL+'\n('+UNIVERSITY_SHORT+')', wraplength=860, foreground='#4b5968').grid(row=1,column=0,columnspan=4,sticky='w',pady=(0,8))
     for n, (key, label) in enumerate(fields):
@@ -199,7 +226,7 @@ def show(process, create_document, initial=None):
     ref_text = tk.Text(ref_tab, height=10, wrap="word", undo=True)
     ref_text.pack(fill="both", expand=True)
     ttk.Label(ref_tab, text="Скрипт оформляет таблицу по нормоконтролю. Недостающих авторов, дат, страниц и адресов он не выдумывает.", wraplength=850).pack(anchor="w", pady=(8, 0))
-    ttk.Label(pane, text="Рамки: точные стыки, 0,75 пт по §7.1.2. Исходный файл не изменяется.", foreground="#596574").grid(row=6, column=0, columnspan=3, sticky="w", pady=(12, 0))
+    ttk.Label(pane, text="Результат сохранится в отдельную папку. Исходная работа останется у вас.", foreground="#596574").grid(row=6, column=0, columnspan=3, sticky="w", pady=(12, 0))
     bar = ttk.Progressbar(pane, mode="indeterminate")
     bar.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(12, 8))
     ttk.Label(pane, textvariable=status, wraplength=900).grid(row=8, column=0, columnspan=3, sticky="w")
@@ -237,10 +264,30 @@ def show(process, create_document, initial=None):
             except Exception as error:
                 events.put(("error", str(error)))
         threading.Thread(target=worker, daemon=True).start()
-    button = ttk.Button(pane, text="Выполнить нормоконтроль", command=run)
+    button = ttk.Button(pane, text="Оформить и проверить", command=run, style='Accent.TButton')
     button.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
     pane.columnconfigure(0, weight=1)
     pane.rowconfigure(5, weight=1)
+    result_path = None
+    result_bar = ttk.Frame(pane)
+    result_bar.grid(row=10, column=0, columnspan=3, sticky='ew', pady=(8, 0))
+    def open_result(name=None):
+        if result_path:
+            try:
+                os.startfile(str(result_path / name if name else result_path))
+            except OSError as error:
+                messagebox.showerror('Не удалось открыть результат', str(error))
+    report_button = ttk.Button(result_bar, text='Посмотреть замечания', command=lambda: open_result('report.html'), state='disabled')
+    report_button.pack(side='left')
+    folder_button = ttk.Button(result_bar, text='Открыть папку с документами', command=open_result, state='disabled')
+    folder_button.pack(side='left', padx=8)
+    def mode_changed(*_):
+        button.configure(text='Проверить работу' if check.get() else 'Оформить и проверить')
+        for tab in notebook.tabs()[1:]:
+            notebook.tab(tab, state='disabled' if check.get() else 'normal')
+        if check.get():
+            notebook.select(0)
+    check.trace_add('write', mode_changed)
     def close():
         if str(button.cget("state")) == "disabled":
             status.set("Дождитесь завершения обработки документа.")
@@ -248,6 +295,7 @@ def show(process, create_document, initial=None):
             root.destroy()
     root.protocol("WM_DELETE_WINDOW", close)
     def poll():
+        nonlocal result_path
         try:
             while True:
                 kind, value = events.get_nowait()
@@ -260,8 +308,11 @@ def show(process, create_document, initial=None):
                         status.set("Не удалось завершить. Исходник не изменён.")
                         messagebox.showerror("Нормоконтроль", value)
                     else:
-                        status.set(f"Готово. {value['pages']} стр., замечаний: {len(value['issues'])}.")
-                        os.startfile(str(Path(value["output"]) / "report.html"))
+                        count = len(value['issues'])
+                        status.set(f"Работа обработана: {value['pages']} стр. Замечаний для просмотра: {count}." if count else 'Обработка завершена. Автоматических замечаний нет — просмотрите документы перед сдачей.')
+                        result_path = Path(value['output'])
+                        report_button.configure(state='normal')
+                        folder_button.configure(state='normal')
         except queue.Empty:
             pass
         root.after(150, poll)
