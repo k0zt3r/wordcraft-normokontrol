@@ -25,3 +25,5 @@ outputs/
 test-results/
 review-local/
 report (*).json
+SKILL.md
+agents/
