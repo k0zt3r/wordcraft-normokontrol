@@ -13,6 +13,17 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_manual_indent_runs_and_year_without_comma(self):
+        p = {'kind': 'para', 'text': '  Текст', 'runs': [{'len': 2}, {'len': 10}]}
+        nk.trim_manual_indent(p)
+        self.assertEqual(p['text'], 'Текст')
+        self.assertEqual(p['runs'], [{'len': 10}])
+        model = {'body': [{'kind': 'para', 'text': '\ufffcИркутск 2024', 'objects': [{'type': 'opaque', 'off': 0}]},
+                          {'kind': 'para', 'text': 'Введение'}], 'styles': {}}
+        nk.fill_cover(model, {'year': '2026'}, [])
+        self.assertEqual(model['body'][0]['text'], '\ufffcИркутск, 2026')
+        self.assertEqual(model['body'][0]['objects'][0]['off'], 0)
+
     def test_visible_font_runs(self):
         parts = ['\ufffc\ufffc', 'Актуальность темы', ' ', 'Текст']
         para = {'text': ''.join(parts), 'runs': [{'len': len(t.encode('utf-8'))} for t in parts]}

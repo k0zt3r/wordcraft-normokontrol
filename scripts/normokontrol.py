@@ -36,7 +36,7 @@ FRAME_STROKE = 0.75  # Normokontrol.pdf §7.1.2, p.11.
 MM = 72 / 25.4
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 SPECIAL = {"содержание", "введение", "заключение", "список использованных источников",
-           "библиографический список", "аннотация", "нормативные ссылки", "обозначения и сокращения"}
+           "библиографический список", "список литературы", "аннотация", "нормативные ссылки", "обозначения и сокращения"}
 CAPTION = re.compile(r"^(Таблица|Рисунок)\s+([А-ЯA-Z\d]+(?:\.\d+)*)\s*[–—-]", re.I)
 
 
@@ -266,8 +266,17 @@ def normalize_model(model, mode, changes):
             props = block.setdefault("props", {})
             font(block, 14)
             props.update({"lineSpacing": {"rule": "multiple", "value": 1.5}, "widowControl": True})
+            if not has_image(block):
+                props.update({'spaceBefore': 0.0, 'spaceAfter': 0.0,
+                              'spaceBeforeAuto': False, 'spaceAfterAuto': False})
+                if not effective_para(model, block).get('numbering'):
+                    props.update({'indentLeft': 0.0, 'indentRight': 0.0})
+                trim_manual_indent(block)
             if level:
                 props.update({"keepNext": True, "keepLines": True, "suppressHyphens": True})
+                centered = effective_para(model, block).get('align') == 'center'
+                props.update({'align': 'center' if centered else 'left',
+                              'indentFirst': 0.0 if centered else 10 * MM})
                 if level == 1 and i > start and norm(block["text"]) != "содержание":
                     props["pageBreakBefore"] = True
             elif CAPTION.match(block.get("text", "")):
@@ -670,9 +679,15 @@ def fill_cover(model, metadata, changes):
                     replace(b, metadata["work_type"])
                 if metadata.get("code") and REG_NUMBER_RE.match(t):
                     replace(b, metadata["code"])
-                if re.match(r"^[А-ЯЁ][а-яё]+,\s*\d{4}", t):
-                    old = t.split(",", 1)
-                    replace(b, metadata.get("city", old[0]) + ", " + metadata.get("year", old[1].strip()))
+                city_year = re.fullmatch(r'([А-ЯЁ][А-Яа-яЁё .-]*?)[,\s]+((?:19|20)\d{2})(?:\s*г\.?)?', t)
+                if city_year and (metadata.get('city') or metadata.get('year')):
+                    # Keep leading Word object markers and their attached objects.
+                    raw = b.get('text', '')
+                    prefix = raw[:raw.find(city_year.group(1))]
+                    objects = copy.deepcopy(b.get('objects'))
+                    replace(b, prefix + metadata.get('city', city_year.group(1)) + ', ' + metadata.get('year', city_year.group(2)))
+                    if objects is not None:
+                        b['objects'] = objects
             if b["kind"] == "table" and len(b.get("rows", [])) == 1 and len(b["rows"][0]["cells"]) == 2:
                 cells = b["rows"][0]["cells"]
                 for ci, pi, key in ((0, 1, "group"), (0, 2, "author"), (1, 1, "supervisor_title"), (1, 2, "supervisor")):
@@ -753,8 +768,11 @@ def stable_text(model, toc):
         if para.get("fields"):
             # Page/REF results can legitimately change. Retain a count and report it separately.
             continue
-        if para.get("text", ""):
-            result.append(para["text"])
+        text = para.get('text', '')
+        if not para.get('objects') and not para.get('fields') and '\n' not in text:
+            text = text.lstrip(' \t\u00a0')
+        if text:
+            result.append(text)
     return result
 
 
@@ -880,10 +898,12 @@ def structural_checks(wc, model, mode, issues):
     toc = detect_toc(body)
     required = ("введение", "заключение", "список использованных источников") if mode == "full" else ()
     for title in required:
-        accepted = {title, "библиографический список"} if title == "список использованных источников" else {title}
+        accepted = {title, "библиографический список", "список литературы"} if title == "список использованных источников" else {title}
         if not any(p["kind"] == "para" and norm(p.get("text", "")) in accepted for p in body):
             add_issue(issues, "structure", f"Не найден раздел «{title.capitalize()}».")
     if mode == "full":
+        if any(p['kind'] == 'para' and norm(p.get('text', '')) == 'список литературы' for p in body):
+            add_issue(issues, 'bibliography-title', 'Раздел «Список литературы» найден. По §6.10 используйте название «Список использованных источников» или «Библиографический список».')
         refs = next((i for i, b in enumerate(body) if b["kind"] == "para" and
                      norm(b.get("text", "")) in {"список использованных источников", "библиографический список"}), None)
         if refs is not None:
@@ -955,6 +975,26 @@ def structural_checks(wc, model, mode, issues):
                 allowed = (14,) if main_text else (12, 14)
                 if props.get("size") and all(abs(props["size"] - size) > .1 for size in allowed):
                     add_issue(issues, "font-size", f"Кегль {props['size']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
+
+
+def trim_manual_indent(para):
+    # Positional objects/fields need separate handling; never shift them blindly.
+    if para.get('objects') or para.get('fields') or '\n' in para.get('text', ''):
+        return
+    text = para.get('text', '')
+    cleaned = text.lstrip(' \t\u00a0')
+    remaining = byte_len(text) - byte_len(cleaned)
+    if not remaining:
+        return
+    runs = []
+    for run in para.get('runs', []):
+        take = min(remaining, run['len'])
+        remaining -= take
+        if run['len'] > take:
+            item = copy.deepcopy(run)
+            item['len'] -= take
+            runs.append(item)
+    para['text'], para['runs'] = cleaned, runs
 
 
 def visible_text_runs(para):
