@@ -219,6 +219,42 @@ def detect_toc(body):
     return next(iter(detect_tocs(body)), None)
 
 
+def auto_toc_text(body):
+    """Strip only generated TOC field results, retaining text outside the field."""
+    stack, result = [], {}
+    generated = False
+    for path, para in paragraphs(body):
+        if generated and re.fullmatch(r'TOC[1-9]', para.get('props', {}).get('style', ''), re.I):
+            result[tuple(path)] = ''
+            continue
+        generated = False
+        objects = iter(para.get('objects', []))
+        outside = []
+        touched = any(stack)
+        for char in para.get('text', ''):
+            obj = next(objects, {}) if char == '\ufffc' else {}
+            if obj.get('type') == 'field' and re.match(r'^TOC(?:\s|$)', obj.get('instr', ''), re.I):
+                touched = generated = True
+                continue
+            if obj.get('type') == 'fieldStart':
+                is_toc = bool(re.match(r'^TOC(?:\s|$)', obj.get('instr', ''), re.I))
+                stack.append(is_toc or any(stack))
+                touched |= any(stack)
+                if any(stack):
+                    continue
+            elif obj.get('type') == 'fieldEnd' and stack:
+                was_toc = stack.pop()
+                if was_toc:
+                    continue
+            if not any(stack):
+                outside.append(char)
+        if touched:
+            result[tuple(path)] = ''.join(outside)
+    if any(stack):
+        raise ValueError('Автооглавление имеет незакрытое поле TOC. Пересоздайте оглавление в редакторе и сохраните документ.')
+    return result
+
+
 def detect_tocs(body):
     found = []
     active = False
@@ -253,9 +289,12 @@ def normalize_model(model, mode, changes):
     body, styles = model["body"], model.get("styles", {})
     toc = detect_toc(body)
     start = body_start(model)
+    auto_toc = auto_toc_text(body)
     refs = next((i for i, p in enumerate(body) if p["kind"] == "para" and
                  norm(p.get("text", "")) in {"список использованных источников", "библиографический список"}), None)
     for i, block in enumerate(body):
+        if (i,) in auto_toc:
+            continue  # Generated field entries are not document headings.
         if i < start:
             # Title typography and the signature table are taken from the user's document.
             continue
@@ -760,7 +799,12 @@ def stable_text(model, toc):
     # Exclude generated TOC page cells and field results; preserve everything else including duplicate text.
     result = []
     toc_tables = set(detect_tocs(model["body"]))
+    auto_toc = auto_toc_text(model['body'])
     for path, para in paragraphs(model["body"]):
+        if tuple(path) in auto_toc:
+            if auto_toc[tuple(path)]:
+                result.append(auto_toc[tuple(path)])
+            continue
         if path[0] in toc_tables and len(path) > 2:
             row = model["body"][path[0]]["rows"][path[1]]
             if len(row["cells"]) > 1 and path[2] == len(row["cells"]) - 1:
@@ -769,6 +813,8 @@ def stable_text(model, toc):
             # Page/REF results can legitimately change. Retain a count and report it separately.
             continue
         text = para.get('text', '')
+        objects = iter(para.get('objects', []))
+        text = ''.join(c for c in text if c != '\ufffc' or next(objects, {}).get('type') not in {'bookmarkStart', 'bookmarkEnd'})
         if not para.get('objects') and not para.get('fields') and '\n' not in text:
             text = text.lstrip(' \t\u00a0')
         if text:
@@ -846,6 +892,9 @@ def add_issue(issues, code, message, page=None):
 def update_toc(wc, model, issues, do_fix=True):
     toc = detect_toc(model["body"])
     if toc is None:
+        if auto_toc_text(model['body']):
+            add_issue(issues, 'toc-auto-review', 'Автоматическое оглавление распознано и сохранено. Проверьте его строки и номера страниц в итоговом PDF; построчная проверка реализована для содержания-таблицы.')
+            return
         if len(wc.execute("document.layout")["pages"]) > 10:
             add_issue(issues, "toc-missing", "Не найдено содержание в виде таблицы из двух или четырёх столбцов.")
         return
@@ -895,6 +944,7 @@ def update_toc(wc, model, issues, do_fix=True):
 
 def structural_checks(wc, model, mode, issues):
     body = model["body"]
+    automatic_contents = auto_toc_text(body)
     toc = detect_toc(body)
     required = ("введение", "заключение", "список использованных источников") if mode == "full" else ()
     for title in required:
@@ -933,6 +983,8 @@ def structural_checks(wc, model, mode, issues):
             if default_page and (tp.get("header"), tp.get("footer")) == (default_page.get("header"), default_page.get("footer")):
                 add_issue(issues, "large-stamp", "На содержании и обычном листе одинаковые колонтитулы: проверьте большой штамп содержания.")
     for i, p in enumerate(body):
+        if (i,) in automatic_contents:
+            continue
         if p["kind"] != "para":
             continue
         text = p.get("text", "")
@@ -958,6 +1010,8 @@ def structural_checks(wc, model, mode, issues):
                 add_issue(issues, "row-split", f"Разрешён разрыв строки {ri + 1}: {body[table_caption(body, i)]['text']}")
     # Font checks resolve inheritance through the native style table below.
     for path, para in paragraphs(body):
+        if tuple(path) in automatic_contents:
+            continue
         if not para.get("text", "").strip():
             continue
         main_text = len(path) == 1 and path[0] >= start

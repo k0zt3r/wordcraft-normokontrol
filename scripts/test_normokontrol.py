@@ -13,6 +13,46 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_auto_contents_field_roundtrip(self):
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            doc = Document()
+            doc.add_paragraph('Тестовая работа')
+            doc.add_page_break()
+            doc.add_paragraph('Содержание')
+            p = doc.add_paragraph()
+            for kind in ('begin', 'instruction', 'separate'):
+                element = OxmlElement('w:instrText' if kind == 'instruction' else 'w:fldChar')
+                if kind == 'instruction':
+                    element.text = ' TOC \\o "1-3" \\h '
+                else:
+                    element.set(qn('w:fldCharType'), kind)
+                p.add_run()._r.append(element)
+            p.add_run('Введение\t3')
+            p = doc.add_paragraph('Заключение\t4')
+            end = OxmlElement('w:fldChar')
+            end.set(qn('w:fldCharType'), 'end')
+            p.add_run()._r.append(end)
+            doc.add_page_break()
+            doc.add_heading('Введение', 1)
+            doc.add_paragraph('Контрольный текст работы.')
+            doc.add_heading('Заключение', 1)
+            doc.add_paragraph('Выводы по работе.')
+            source = folder / 'auto.docx'
+            doc.save(source)
+            for check in (False, True):
+                report = nk.process(source, out=folder / str(check), check_only=check, progress=lambda _: None)
+                self.assertFalse(any(i['code'] == 'toc-missing' for i in report['issues']))
+                result = Document(folder / str(check) / report['docx_name'])
+                self.assertIn('Контрольный текст работы.', [p.text for p in result.paragraphs])
+
+    def test_auto_contents_keeps_surrounding_text(self):
+        para = {'kind': 'para', 'text': 'До\ufffcстарые строки\ufffcПосле',
+                'objects': [{'type': 'fieldStart', 'instr': 'TOC'}, {'type': 'fieldEnd'}]}
+        self.assertEqual(nk.auto_toc_text([para])[(0,)], 'ДоПосле')
+
     def test_manual_indent_runs_and_year_without_comma(self):
         p = {'kind': 'para', 'text': '  Текст', 'runs': [{'len': 2}, {'len': 10}]}
         nk.trim_manual_indent(p)
