@@ -38,6 +38,7 @@ NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 SPECIAL = {"содержание", "введение", "заключение", "список использованных источников",
            "библиографический список", "список литературы", "аннотация", "нормативные ссылки", "обозначения и сокращения"}
 CAPTION = re.compile(r"^(Таблица|Рисунок)\s+([А-ЯA-Z\d]+(?:\.\d+)*)\s*[–—-]", re.I)
+NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+){0,3})(\.)?\s+\S")
 
 
 def norm(text):
@@ -178,8 +179,9 @@ def heading_level(para, styles):
     text = norm(para.get("text", ""))
     if text in SPECIAL or re.fullmatch(r"приложение\s+(?:[а-яёa-z]|\d+)", text):
         return 1
-    if re.match(r"^\d+(?:\.\d+){0,3}\s+\S", text):
-        return text.split()[0].count(".") + 1
+    numbered = NUMBERED_HEADING.match(text)
+    if numbered:
+        return numbered[1].count(".") + 1
     props = para.get("props", {})
     level = props.get("outlineLevel")
     style_id = props.get("style")
@@ -315,8 +317,12 @@ def normalize_model(model, mode, changes):
                 trim_manual_indent(block)
             if level:
                 props.update({"keepNext": True, "keepLines": True, "suppressHyphens": True})
-                # Appendix Е: two line intervals between a heading and its text.
-                props["spaceAfter"] = 28.0
+                # User profile: spacing only after chapters; subheadings flow into text.
+                props.update(spaceAfter=28.0 if level == 1 else 0.0,
+                             outlineLevel=level - 1)
+                if level > 1:
+                    # Explicit False also overrides a page break inherited from Heading 1.
+                    props["pageBreakBefore"] = False
                 centered = effective_para(model, block).get('align') == 'center'
                 props.update({'align': 'center' if centered else 'left',
                               'indentFirst': 0.0 if centered else 10 * MM})

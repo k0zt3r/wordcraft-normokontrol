@@ -13,6 +13,26 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_dotted_subheadings_wordcraft_roundtrip(self):
+        with tempfile.TemporaryDirectory(prefix='subheading-test-') as directory:
+            folder = Path(directory)
+            doc = Document()
+            for title in ('Введение', '1 Глава', '1.1. Подраздел', '1.1.1. Пункт', '1.2 Подраздел'):
+                heading = doc.add_heading(title, 1)
+                heading.paragraph_format.page_break_before = True
+                doc.add_paragraph('Текст сразу после заголовка.')
+            source = folder / 'source.docx'
+            doc.save(source)
+            report = nk.process(source, folder / 'result', progress=lambda _: None)
+            result = Document(folder / 'result' / report['docx_name'])
+            subs = [p for p in result.paragraphs if p.text in {'1.1. Подраздел', '1.1.1. Пункт', '1.2 Подраздел'}]
+            self.assertEqual(len(subs), 3)
+            for p in subs:
+                self.assertFalse(p.paragraph_format.page_break_before)
+                self.assertEqual(p.paragraph_format.space_after.pt, 0)
+            self.assertFalse(any(i['code'] in {'subheading-spacing', 'subheading-page-break'} for i in report['issues']))
+            self.assertTrue(any(i['code'] == 'heading-number-dot' for i in report['issues']))
+
     def test_native_list_marker_and_heading_indent(self):
         from list_formatting import normalize
         model = {'numbering': {'nums': [{'id': 1, 'abstractId': 0}],

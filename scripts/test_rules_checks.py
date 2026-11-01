@@ -25,7 +25,7 @@ class RuleTests(unittest.TestCase):
                             paragraph('1.3 Повтор'), paragraph('3.1 Без раздела')])
         self.assertTrue({'heading-sequence', 'heading-parent', 'heading-number'} <= codes)
         valid = self.codes([paragraph('1 Раздел', spaceAfter=28),
-                            paragraph('1.1 Подраздел', spaceAfter=28),
+                            paragraph('1.1 Подраздел', spaceAfter=0),
                             paragraph('2 Раздел', spaceAfter=28)])
         self.assertFalse(valid)
 
@@ -53,6 +53,26 @@ class RuleTests(unittest.TestCase):
         nk.normalize_model(model, 'full', [])
         self.assertEqual(model['body'][0]['props']['spaceAfter'], 28)
         self.assertNotIn('heading-spacing', self.codes(model['body']))
+
+    def test_dotted_subheadings_override_wrong_style_and_page_break(self):
+        for title, level in [('1.1. Подраздел', 2), ('1.2 Подраздел', 2),
+                             ('1.1.1. Пункт', 3), ('1.1.1.1. Подпункт', 4),
+                             ('1. Глава', 1)]:
+            with self.subTest(title=title):
+                p = paragraph(title, style='Heading1', pageBreakBefore=True)
+                model = {'body': [paragraph('Введение'), p], 'styles': {'styles': [
+                    {'id': 'Heading1', 'para': {'outlineLevel': 0, 'pageBreakBefore': True}}]}}
+                self.assertEqual(nk.heading_level(p, model['styles']), level)
+                nk.normalize_model(model, 'full', [])
+                self.assertEqual(p['props']['outlineLevel'], level - 1)
+                self.assertEqual(p['props']['spaceAfter'], 28 if level == 1 else 0)
+                self.assertEqual(p['props']['pageBreakBefore'], level == 1)
+                self.assertTrue(p['props']['keepNext'])
+
+    def test_subheading_checks_preserve_check_only_input(self):
+        codes = self.codes([paragraph('1 Глава', spaceAfter=28),
+                            paragraph('1.1. Подраздел', pageBreakBefore=True, spaceAfter=28)])
+        self.assertTrue({'subheading-spacing', 'subheading-page-break', 'heading-number-dot'} <= codes)
 
 
 if __name__ == '__main__':

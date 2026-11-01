@@ -5,7 +5,7 @@ import re
 def check_rules(model, mode, issues):
     from normokontrol import (body_start, paragraphs, effective_para, effective_char,
                              visible_text_runs, heading_level, CAPTION, auto_toc_text,
-                             detect_tocs, norm, MM, add_issue)
+                             detect_tocs, norm, MM, add_issue, NUMBERED_HEADING)
     body = model['body']
     start = body_start(model)
     automatic = auto_toc_text(body)
@@ -23,10 +23,17 @@ def check_rules(model, mode, issues):
         props = effective_para(model, para)
         level = heading_level(para, model.get('styles', {})) if len(path) == 1 else None
         if level:
-            if (props.get('spaceAfter') or 0) < 28 - .1:
+            if level == 1 and (props.get('spaceAfter') or 0) < 28 - .1:
                 add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')
-            match = re.match(r'^(\d+(?:\.\d+)*)\s+\S', text)
+            if level > 1:
+                if (props.get('spaceAfter') or 0) > .1:
+                    add_issue(issues, 'subheading-spacing', f'По выбранному образцу после подзаголовка текст должен идти со следующей строки без дополнительного интервала: {text}')
+                if props.get('pageBreakBefore'):
+                    add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}')
+            match = NUMBERED_HEADING.match(text)
             if match:
+                if match[2]:
+                    add_issue(issues, 'heading-number-dot', f'Точка после номера заголовка (§7.2.2): {text}')
                 number = tuple(map(int, match[1].split('.')))
                 if number in headings:
                     add_issue(issues, 'heading-number', f'Повтор номера раздела: {match[1]}.')
