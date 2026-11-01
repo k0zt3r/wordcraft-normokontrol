@@ -32,6 +32,7 @@ from irgups_data import prepare_metadata, REG_NUMBER_RE
 FONT = "Times New Roman"
 STAMP_FONT = "ISOCPEUR"
 STAMP_SIZE = 9
+STAMP_CODE_SIZE = 16
 FRAME_STROKE = 0.75  # Normokontrol.pdf §7.1.2, p.11.
 MM = 72 / 25.4
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
@@ -182,7 +183,8 @@ def heading_level(para, styles, numbering=None):
     if re.match(r"^глава\s+(?:\d+|[ivxlcdm]+)(?:[.\s:–—-]|$)", text):
         return 1
     numbered = NUMBERED_HEADING.match(text)
-    if numbered:
+    # A plain "1. Item" is a list unless its paragraph is explicitly a heading.
+    if numbered and ('.' in numbered[1] or not numbered[2]):
         return numbered[1].count(".") + 1
     props = para.get("props", {})
     level = props.get("outlineLevel")
@@ -193,6 +195,8 @@ def heading_level(para, styles, numbering=None):
         style = next((s for s in styles.get("styles", []) if s.get("id") == style_id), {}) if isinstance(styles, dict) else {}
         level = style.get("para", {}).get("outlineLevel")
         style_id = style.get("basedOn")
+    if numbered and level is not None and level < 9:
+        return numbered[1].count('.') + 1
     # Native list numbers are not part of para.text. Resolve them before trusting
     # an incorrect outlineLevel=0 copied onto every heading in a document.
     model = {'styles': styles}
@@ -319,7 +323,7 @@ def normalize_model(model, mode, changes):
             # Title typography and the signature table are taken from the user's document.
             continue
         if block["kind"] == "para":
-            if not block.get("text", "").strip():
+            if not norm(block.get("text", "")):
                 continue  # Preserve the user's deliberate title/page spacing.
             level = heading_level(block, styles, model.get('numbering'))
             props = block.setdefault("props", {})
@@ -362,6 +366,10 @@ def normalize_model(model, mode, changes):
                 props["lineSpacing"] = {"rule": "multiple", "value": 1.0}
                 props["keepNext"] = True
             normalize_list(model, block, level, list_cache)
+            literal_item = NUMBERED_HEADING.match(norm(block.get('text', '')))
+            if not level and literal_item and literal_item[2] and '.' not in literal_item[1]:
+                props.update(align='left', indentFirst=10 * MM, keepNext=False,
+                             pageBreakBefore=False, outlineLevel=9)
         elif block["kind"] == "table":
             caption = table_caption(body, i)
             data_table = caption is not None
@@ -530,7 +538,7 @@ def apply_frames(model, metadata, changes, issues):
             for i, (title, name) in enumerate((("Разраб.", values["author"]), ("Пров.", values["supervisor"]), ("", ""), ("Н.контр.", ""), ("Утв.", ""))):
                 label(title, 0, 15 + i * 5, 17, 5)
                 label(name, 17, 15 + i * 5, 23, 5)
-            label(values["code"], 65, 0, 120, 15)
+            label(values["code"], 65, 0, 120, 15, STAMP_CODE_SIZE)
             label(values["stamp_title"], 65, 15, 70, 25)
             for title, x, w in (("Литера", 135, 15), ("Лист", 150, 15), ("Листов", 165, 20)):
                 label(title, x, 15, w, 5)
@@ -541,7 +549,7 @@ def apply_frames(model, metadata, changes, issues):
             # Fig. И.4: 185 × 15 mm, 7 mm label and 8 mm page-number cell.
             line(175, 0, 175, 15)
             line(175, 7, 185, 7)
-            label(values["code"], 65, 0, 110, 15)
+            label(values["code"], 65, 0, 110, 15, STAMP_CODE_SIZE)
             label("Лист", 175, 0, 10, 7)
             label("", 175, 7, 10, 8, STAMP_SIZE, "PAGE")
         p = {"kind": "para", "text": "\ufffc" * len(objects),
@@ -608,7 +616,7 @@ def apply_frames(model, metadata, changes, issues):
         if saved_part["kind"] not in {"header", "footer", "textBox"}:
             visit(saved_part)
     model["parts"] = {k: v for k, v in model["parts"].items() if int(k) in reachable or v["kind"] not in {"header", "footer", "textBox"}}
-    changes.append("Построены штампы текстовых документов по И.3 и И.4 (стр.44): ISOCPEUR 9 пт, выравнивание по центру, линии 0,75 пт; титульник без рамки.")
+    changes.append("Построены штампы текстовых документов по И.3 и И.4 (стр.44): ISOCPEUR, шифр 16 пт, остальные надписи 9 пт; линии 0,75 пт, титульник без рамки.")
 
 
 def add_templates(model, toc_template, bibliography, changes, toc_entries=None, bibliography_entries=None):
@@ -1041,7 +1049,7 @@ def structural_checks(wc, model, mode, issues):
     for path, para in paragraphs(body):
         if tuple(path) in automatic_contents:
             continue
-        if not para.get("text", "").strip():
+        if not norm(para.get("text", "")):
             continue
         main_text = len(path) == 1 and path[0] >= start
         if main_text and not has_image(para):
@@ -1218,6 +1226,9 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 add_optional_sections(model, optional_sections, changes)
             from captions import fill_captions
             from whitespace_cleanup import clean
+            from document_cleanup import prepare
+            if format_text or check_only:
+                prepare(model, changes, issues, check_only=check_only)
             if format_text or check_only:
                 clean(model, changes, issues, check_only=check_only)
             fill_captions(model, changes, issues, check_only=check_only)

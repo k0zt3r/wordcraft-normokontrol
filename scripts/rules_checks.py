@@ -18,7 +18,7 @@ def check_rules(model, mode, issues):
         if path[0] < start or path[0] in toc or tuple(path) in automatic:
             continue
         text = para.get('text', '').strip()
-        if not text:
+        if not norm(text):
             continue
         props = effective_para(model, para)
         level = heading_level(para, model.get('styles', {}), model.get('numbering')) if len(path) == 1 else None

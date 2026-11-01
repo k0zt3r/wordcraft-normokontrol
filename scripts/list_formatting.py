@@ -17,7 +17,7 @@ def normalize(model, para, heading, cache):
     if not abstract or not 0 <= level_index < len(abstract.get('levels', [])):
         return False
     level = abstract['levels'][level_index]
-    if level['format'] != 'bullet' and not heading:
+    if level['format'] not in {'bullet', 'decimal'} and not heading:
         return False
     key = (num['id'], bool(heading))
     if key not in cache:
