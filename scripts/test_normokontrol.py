@@ -13,6 +13,39 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_caption_checks_do_not_mutate(self):
+        import copy
+        from captions import fill_captions
+        model = {'body': [{'kind': 'para', 'text': 'Введение'},
+                         {'kind': 'para', 'text': 'Рисунок 1 — Схема'},
+                         {'kind': 'para', 'text': '\ufffc', 'objects': [{'type': 'image'}]},
+                         {'kind': 'table', 'rows': []}], 'styles': {}}
+        original = copy.deepcopy(model)
+        issues = []
+        fill_captions(model, [], issues, check_only=True)
+        self.assertEqual(model, original)
+        self.assertTrue(any(i['code'] == 'caption-position' for i in issues))
+        self.assertTrue(any(i['code'] == 'caption-missing' for i in issues))
+
+    def test_missing_captions_and_repeat_run(self):
+        from captions import fill_captions
+        def p(text):
+            return {'kind': 'para', 'text': text}
+        model = {'body': [p('Титульник'), p('Введение'),
+                         {'kind': 'para', 'text': '\ufffc', 'objects': [{'type': 'image'}]},
+                         {'kind': 'table', 'rows': []},
+                         {'kind': 'para', 'text': '\ufffc', 'objects': [{'type': 'image'}]},
+                         p('Список использованных источников'), {'kind': 'table', 'rows': []}], 'styles': {}}
+        changes, issues = [], []
+        fill_captions(model, changes, issues)
+        texts = [b.get('text', '') for b in model['body']]
+        self.assertIn('Рисунок 1 — Впишите название рисунка', texts)
+        self.assertIn('Рисунок 2 — Впишите название рисунка', texts)
+        self.assertIn('Таблица 1 — Впишите название таблицы', texts)
+        self.assertEqual(len(changes), 3)
+        fill_captions(model, changes, issues)
+        self.assertEqual(len(changes), 3)
+
     def test_auto_contents_field_roundtrip(self):
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
