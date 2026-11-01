@@ -1188,6 +1188,9 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 add_templates(model, toc_template, bibliography_template, changes, toc_entries, bibliography_entries)
                 add_optional_sections(model, optional_sections, changes)
             from captions import fill_captions
+            from whitespace_cleanup import clean
+            if format_text or check_only:
+                clean(model, changes, issues, check_only=check_only)
             fill_captions(model, changes, issues, check_only=check_only)
             expected_text = stable_text(model, detect_toc(model["body"]))
             expected_tables = original["tables"] + sum(b["kind"] == "table" for b in model["body"]) - initial_tables

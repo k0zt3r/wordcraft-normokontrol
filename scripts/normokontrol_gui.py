@@ -78,7 +78,7 @@ def show(process, create_document, initial=None):
     bibliography = tk.BooleanVar(value=False)
     status = tk.StringVar(value="Выберите DOCX или создайте новый документ. Все поля необязательные.")
     fields = (("author", "Фамилия И.О. студента"), ("group", "Группа"),
-              ("supervisor", "Фамилия И.О. преподавателя"), ("supervisor_title", "Должность / регалии"),
+              ("supervisor", "Фамилия И.О. преподавателя"), ("supervisor_title", "Должность целиком (с кафедрой)"),
               ("work_type", "Вид работы"), ("discipline", "Дисциплина"),
               ("title", "Название работы / тема"), ("code", "Шифр работы"),
               ("city", "Город"), ("year", "Год"),
@@ -112,7 +112,7 @@ def show(process, create_document, initial=None):
     notebook.add(reg_tab, text="Регистрационный номер")
     notebook.add(toc_tab, text="Содержание")
     notebook.add(ref_tab, text="Список литературы")
-    ttk.Label(title_tab, text="Заполните нужное. Пустое поле сохраняет исходное значение; в новом документе остаётся пустым.", wraplength=860).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 12))
+    ttk.Label(title_tab, text="Пустые поля сохраняют исходные данные. Должность заменяется целиком: например, «к.т.н., доцент каф. ИСиЗИ».", wraplength=860).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 12))
     ttk.Label(title_tab, text=UNIVERSITY_FULL+'\n('+UNIVERSITY_SHORT+')', wraplength=860, foreground='#4b5968').grid(row=1,column=0,columnspan=4,sticky='w',pady=(0,8))
     for n, (key, label) in enumerate(fields):
         row, col = n // 2 + 3, n % 2 * 2

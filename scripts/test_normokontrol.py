@@ -13,6 +13,23 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_whitespace_cleanup_preserves_runs_and_breaks(self):
+        import copy
+        from whitespace_cleanup import clean
+        body = [{'kind': 'para', 'text': 'Введение'},
+                {'kind': 'para', 'text': 'Один  два ', 'runs': [{'len': len('Один  '.encode()), 'props': {'italic': True}}, {'len': len('два '.encode())}]},
+                {'kind': 'para', 'text': ' '}, {'kind': 'para', 'text': '\f'},
+                {'kind': 'para', 'text': '\ufffc', 'objects': [{'type': 'image'}]}]
+        model = {'body': body, 'styles': {}}
+        before = copy.deepcopy(model)
+        clean(model, [], [], check_only=True)
+        self.assertEqual(model, before)
+        clean(model, [], [])
+        self.assertEqual(body[1]['text'], 'Один два')
+        self.assertTrue(body[1]['runs'][0]['props']['italic'])
+        self.assertEqual(body[2]['text'], '\f')
+        self.assertEqual(body[3]['objects'][0]['type'], 'image')
+
     def test_caption_checks_do_not_mutate(self):
         import copy
         from captions import fill_captions
