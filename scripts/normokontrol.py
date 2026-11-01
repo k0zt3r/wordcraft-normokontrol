@@ -849,7 +849,8 @@ def update_toc(wc, model, issues, do_fix=True):
                     continue  # Intentionally blank rows in the course's contents template.
                 candidates = heads.get(title, [])
                 if len(candidates) != 1:
-                    add_issue(issues, "toc-match", f"Строка содержания не сопоставлена однозначно с заголовком: {title}")
+                    reason = 'не найден заголовок с таким же текстом' if not candidates else 'найдено несколько одинаковых заголовков'
+                    add_issue(issues, "toc-match", f"Содержание «{title}»: {reason}. Проверьте формулировку и разбиение заголовка на абзацы; наличие гиперссылки здесь не проверяется.")
                     continue
                 location = wc.locate([candidates[0]])
                 value = str(location["number"])
@@ -944,16 +945,29 @@ def structural_checks(wc, model, mode, issues):
             spacing = effective_para(model, para).get("lineSpacing", {})
             if spacing.get("rule") != "multiple" or abs(spacing.get("value", 0) - 1.5) > .01:
                 add_issue(issues, "line-spacing", f"Межстрочный интервал отличается от 1,5: {para['text'][:100]}")
-        for run in para.get("runs", []):
+        for run, run_text in visible_text_runs(para):
             props = effective_char(model, para, run)
             if props.get("bold"):
                 add_issue(issues, "bold", f"Полужирный текст: {para['text'][:100]}")
             if main_text or (len(path) > 1 and path[0] >= start):
                 if props.get("font") and props["font"] != FONT:
-                    add_issue(issues, "font", f"Шрифт {props['font']}: {para['text'][:100]}")
+                    add_issue(issues, "font", f"Шрифт {props['font']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
                 allowed = (14,) if main_text else (12, 14)
                 if props.get("size") and all(abs(props["size"] - size) > .1 for size in allowed):
-                    add_issue(issues, "font-size", f"Кегль {props['size']}: {para['text'][:100]}")
+                    add_issue(issues, "font-size", f"Кегль {props['size']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
+
+
+def visible_text_runs(para):
+    """Only actual text: object markers and whitespace carry no visible font."""
+    data = para.get('text', '').encode('utf-8')
+    offset = 0
+    for run in para.get('runs', []):
+        length = run.get('len', 0)
+        text = data[offset:offset + length].decode('utf-8')
+        offset += length
+        visible = text.replace('\ufffc', '').strip()
+        if visible:
+            yield run, visible
 
 
 def reference_exists(text, kind, number):

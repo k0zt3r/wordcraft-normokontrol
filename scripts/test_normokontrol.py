@@ -13,6 +13,11 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_visible_font_runs(self):
+        parts = ['\ufffc\ufffc', 'Актуальность темы', ' ', 'Текст']
+        para = {'text': ''.join(parts), 'runs': [{'len': len(t.encode('utf-8'))} for t in parts]}
+        self.assertEqual([text for _, text in nk.visible_text_runs(para)], ['Актуальность темы', 'Текст'])
+
     def test_registration_from_pdf_examples_and_locked_institution(self):
         self.assertEqual(generate_number('ПП','450200','23.05.05'),'ПП.450200.23.05.05.ПЗ')
         self.assertEqual(generate_number('ДП','450200','23.05.05',account='001',year='2017'),
