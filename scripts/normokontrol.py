@@ -286,6 +286,8 @@ def table_caption(body, index):
 
 
 def normalize_model(model, mode, changes):
+    from list_formatting import normalize as normalize_list
+    list_cache = {}
     body, styles = model["body"], model.get("styles", {})
     toc = detect_toc(body)
     start = body_start(model)
@@ -335,6 +337,7 @@ def normalize_model(model, mode, changes):
                 # Changing an image paragraph's line height can clip its image.
                 props["lineSpacing"] = {"rule": "multiple", "value": 1.0}
                 props["keepNext"] = True
+            normalize_list(model, block, level, list_cache)
         elif block["kind"] == "table":
             caption = table_caption(body, i)
             data_table = caption is not None

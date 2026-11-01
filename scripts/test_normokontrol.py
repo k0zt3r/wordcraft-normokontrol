@@ -13,6 +13,19 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_native_list_marker_and_heading_indent(self):
+        from list_formatting import normalize
+        model = {'numbering': {'nums': [{'id': 1, 'abstractId': 0}],
+                 'abstracts': [{'id': 0, 'levels': [{'format': 'bullet', 'text': '•', 'indent': 72, 'hanging': 18, 'chr': {'font': 'Symbol'}}]}]}, 'styles': {}}
+        para = {'props': {'numbering': {'num': 1, 'level': 0}, 'indentLeft': 72}}
+        self.assertTrue(normalize(model, para, None, {}))
+        level = model['numbering']['abstracts'][-1]['levels'][0]
+        self.assertEqual(level['text'], '-')
+        self.assertEqual(level['suffix'], 'space')
+        self.assertEqual(para['props']['indentFirst'], 10 * nk.MM)
+        self.assertEqual(para['props']['indentLeft'], 0)
+        self.assertEqual(model['numbering']['abstracts'][0]['levels'][0]['text'], '•')
+
     def test_whitespace_cleanup_preserves_runs_and_breaks(self):
         import copy
         from whitespace_cleanup import clean
