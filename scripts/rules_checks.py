@@ -21,7 +21,7 @@ def check_rules(model, mode, issues):
         if not text:
             continue
         props = effective_para(model, para)
-        level = heading_level(para, model.get('styles', {})) if len(path) == 1 else None
+        level = heading_level(para, model.get('styles', {}), model.get('numbering')) if len(path) == 1 else None
         if level:
             if level == 1 and (props.get('spaceAfter') or 0) < 28 - .1:
                 add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')

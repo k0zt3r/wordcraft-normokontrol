@@ -175,9 +175,11 @@ def paragraphs(blocks, prefix=()):
                     yield from paragraphs(cell["blocks"], (*path, ri, ci))
 
 
-def heading_level(para, styles):
+def heading_level(para, styles, numbering=None):
     text = norm(para.get("text", ""))
     if text in SPECIAL or re.fullmatch(r"приложение\s+(?:[а-яёa-z]|\d+)", text):
+        return 1
+    if re.match(r"^глава\s+(?:\d+|[ivxlcdm]+)(?:[.\s:–—-]|$)", text):
         return 1
     numbered = NUMBERED_HEADING.match(text)
     if numbered:
@@ -191,6 +193,20 @@ def heading_level(para, styles):
         style = next((s for s in styles.get("styles", []) if s.get("id") == style_id), {}) if isinstance(styles, dict) else {}
         level = style.get("para", {}).get("outlineLevel")
         style_id = style.get("basedOn")
+    # Native list numbers are not part of para.text. Resolve them before trusting
+    # an incorrect outlineLevel=0 copied onto every heading in a document.
+    model = {'styles': styles}
+    ref = effective_para(model, para).get('numbering') or {}
+    data = numbering or {}
+    num = next((n for n in data.get('nums', []) if n['id'] == ref.get('num')), {})
+    abstract = next((a for a in data.get('abstracts', []) if a['id'] == num.get('abstractId')), {})
+    index = ref.get('level', 0)
+    levels = abstract.get('levels', [])
+    if isinstance(index, int) and 0 <= index < len(levels):
+        native = levels[index]
+        tokens = re.findall(r'%([1-9])', native.get('text', ''))
+        if native.get('format') == 'decimal' and tokens and (level is not None or len(tokens) > 1):
+            return max(map(int, tokens))
     return level + 1 if isinstance(level, int) and level < 9 else None
 
 
@@ -305,7 +321,7 @@ def normalize_model(model, mode, changes):
         if block["kind"] == "para":
             if not block.get("text", "").strip():
                 continue  # Preserve the user's deliberate title/page spacing.
-            level = heading_level(block, styles)
+            level = heading_level(block, styles, model.get('numbering'))
             props = block.setdefault("props", {})
             font(block, 14)
             props.update({"lineSpacing": {"rule": "multiple", "value": 1.5}, "widowControl": True})
@@ -658,7 +674,7 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
 def body_start(model):
     body = model["body"]
     heading = next((i for i, b in enumerate(body) if b["kind"] == "para" and
-                    (norm(b.get("text", "")) in SPECIAL or heading_level(b, model.get("styles", {})))), None)
+                    (norm(b.get("text", "")) in SPECIAL or heading_level(b, model.get("styles", {}), model.get('numbering')))), None)
     toc = detect_toc(body)
     if toc is not None:
         return min(heading, toc) if heading is not None else toc
@@ -912,7 +928,7 @@ def update_toc(wc, model, issues, do_fix=True):
     body, styles = model["body"], model.get("styles", {})
     heads = {}
     for i, para in enumerate(body):
-        if para["kind"] == "para" and heading_level(para, styles) and norm(para.get("text", "")) != "содержание":
+        if para["kind"] == "para" and heading_level(para, styles, model.get('numbering')) and norm(para.get("text", "")) != "содержание":
             heads.setdefault(norm(para["text"]), []).append(i)
     for _ in range(4):
         changed = False
@@ -1009,10 +1025,10 @@ def structural_checks(wc, model, mode, issues):
                               and not CAPTION.match(b.get("text", "")))
             if not reference_exists(other, match.group(1), number):
                 add_issue(issues, "reference", f"Не найдена текстовая ссылка: {match.group(1)} {number}.")
-        if heading_level(p, model.get("styles", {})) and text.rstrip().endswith("."):
+        if heading_level(p, model.get("styles", {}), model.get('numbering')) and text.rstrip().endswith("."):
             add_issue(issues, "heading-dot", f"Точка в конце заголовка: {text}")
     start = next((i for i, p in enumerate(body) if p["kind"] == "para" and
-                  (norm(p.get("text", "")) in SPECIAL or heading_level(p, model.get("styles", {})))), 0)
+                  (norm(p.get("text", "")) in SPECIAL or heading_level(p, model.get("styles", {}), model.get('numbering')))), 0)
     for i, block in enumerate(body):
         if block["kind"] != "table" or table_caption(body, i) is None:
             continue

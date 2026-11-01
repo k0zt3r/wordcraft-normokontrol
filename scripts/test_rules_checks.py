@@ -11,6 +11,25 @@ def paragraph(text, **props):
 
 
 class RuleTests(unittest.TestCase):
+    def test_native_heading_numbering_overrides_outline(self):
+        numbering = {'nums': [{'id': 1, 'abstractId': 4}], 'abstracts': [
+            {'id': 4, 'levels': [{'format': 'decimal', 'text': '%1.'},
+                                 {'format': 'decimal', 'text': '%1.%2.'},
+                                 {'format': 'decimal', 'text': '%1.%2.%3.'}]}]}
+        styles = {'styles': [{'id': 'WrongHeading', 'para': {'outlineLevel': 0,
+                  'pageBreakBefore': True, 'numbering': {'num': 1, 'level': 1}}}]}
+        p = paragraph('Внутренние риски', style='WrongHeading')
+        self.assertEqual(nk.heading_level(p, styles, numbering), 2)
+        model = {'body': [paragraph('Глава 1. Теория'), p], 'styles': styles, 'numbering': numbering}
+        nk.normalize_model(model, 'full', [])
+        self.assertFalse(p['props']['pageBreakBefore'])
+        self.assertEqual(p['props']['spaceAfter'], 0)
+        p['props']['numbering']['level'] = 2
+        self.assertEqual(nk.heading_level(p, styles, numbering), 3)
+        self.assertEqual(nk.heading_level(paragraph('Глава 2. Практика'), {}), 1)
+        self.assertEqual(nk.heading_level(paragraph('2 Практика'), {}), 1)
+        self.assertEqual(nk.heading_level(paragraph('2.1 Подраздел'), {}), 2)
+
     def codes(self, body):
         model = {'body': body, 'styles': {}}
         original = copy.deepcopy(model)
