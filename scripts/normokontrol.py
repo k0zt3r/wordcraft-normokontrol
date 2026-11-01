@@ -176,7 +176,7 @@ def paragraphs(blocks, prefix=()):
 
 def heading_level(para, styles):
     text = norm(para.get("text", ""))
-    if text in SPECIAL or re.fullmatch(r"приложение\s+[а-яa-z]", text):
+    if text in SPECIAL or re.fullmatch(r"приложение\s+(?:[а-яёa-z]|\d+)", text):
         return 1
     if re.match(r"^\d+(?:\.\d+){0,3}\s+\S", text):
         return text.split()[0].count(".") + 1
@@ -315,6 +315,8 @@ def normalize_model(model, mode, changes):
                 trim_manual_indent(block)
             if level:
                 props.update({"keepNext": True, "keepLines": True, "suppressHyphens": True})
+                # Appendix Е: two line intervals between a heading and its text.
+                props["spaceAfter"] = 28.0
                 centered = effective_para(model, block).get('align') == 'center'
                 props.update({'align': 'center' if centered else 'left',
                               'indentFirst': 0.0 if centered else 10 * MM})
@@ -946,6 +948,8 @@ def update_toc(wc, model, issues, do_fix=True):
 
 
 def structural_checks(wc, model, mode, issues):
+    from rules_checks import check_rules
+    check_rules(model, mode, issues)
     body = model["body"]
     automatic_contents = auto_toc_text(body)
     toc = detect_toc(body)

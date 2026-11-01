@@ -223,6 +223,10 @@ class NormokontrolTests(unittest.TestCase):
             self.assertEqual(fixed_para.runs[0].font.name, "Times New Roman")
             self.assertEqual(fixed_para.runs[0].font.size.pt, 14)
             self.assertFalse(fixed_para.runs[0].bold)
+            introduction = next(p for p in final.paragraphs if p.text == 'Введение')
+            self.assertAlmostEqual(introduction.paragraph_format.space_after.pt, 28, places=1)
+            self.assertFalse(any(item['code'] in {'heading-spacing', 'paragraph-indent', 'text-color'}
+                                 for item in result['issues']))
             shell = next(p for p in final.paragraphs if p.text.startswith('for x in'))
             self.assertEqual(shell.alignment, 0)  # Left, not stretched across manual line breaks.
             final_toc = next(t for t in final.tables if len(t.columns) == 4)
