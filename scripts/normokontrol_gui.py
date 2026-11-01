@@ -239,6 +239,8 @@ def show(process, create_document, initial=None):
         threading.Thread(target=worker, daemon=True).start()
     button = ttk.Button(pane, text="Выполнить нормоконтроль", command=run)
     button.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+    from updater import show_updates
+    ttk.Button(pane, text='Проверить обновления', command=lambda: show_updates(root, lambda: str(button.cget('state')) == 'disabled')).grid(row=10, column=0, columnspan=3, sticky='e', pady=(8, 0))
     pane.columnconfigure(0, weight=1)
     pane.rowconfigure(5, weight=1)
     def close():
