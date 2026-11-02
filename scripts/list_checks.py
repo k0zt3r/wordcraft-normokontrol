@@ -104,11 +104,13 @@ def format_simple(model, changes, issues, check_only=False):
         if len(cluster) < 2 or first <= start:
             continue
         intro = body[first - 1]
+        dash_list = all(entry[0] == ('manual', 'dash') for _, entry in cluster)
+        introduced = (intro.get('kind') == 'para' and first - 1 not in excluded
+                      and not _list_entry(model, intro) and not intro.get('fields')
+                      and not intro.get('objects') and intro.get('text', '').rstrip().endswith(':'))
         # Do not turn one side of a mixed-ID/marker list into an independent
         # simple group, and never look backwards across a blank paragraph.
-        if (intro.get('kind') != 'para' or first - 1 in excluded
-                or _list_entry(model, intro) or intro.get('fields') or intro.get('objects')
-                or not intro.get('text', '').rstrip().endswith(':')
+        if ((not dash_list and not introduced)
                 or (last + 1 < len(body) and _list_entry(model, body[last + 1]))):
             continue
         if len({entry[1] for _, entry in cluster}) != 1:
@@ -117,7 +119,7 @@ def format_simple(model, changes, issues, check_only=False):
         safe = True
         for order, (i, (_, _, content)) in enumerate(cluster):
             p = body[i]
-            if (not content or content.endswith(':') or re.search(r'[.!?]\s+\S', content)
+            if (not content or content.endswith(':')
                     or p.get('fields') or any(o.get('type') not in {'bookmarkStart', 'bookmarkEnd'} for o in p.get('objects', []))
                     or any(c in p.get('text', '') for c in '\n\r\f\t')
                     or content.endswith(('!', '?', '…', '"', "'", '»', '”', '’', ')', ']', '}'))
@@ -142,7 +144,7 @@ def format_simple(model, changes, issues, check_only=False):
             for i, updated in staged:
                 body[i] = updated
             if staged:
-                changes.append(f'Исправлены только окончания {len(staged)} пунктов однозначного перечисления после двоеточия по приложению Д; слова и регистр сохранены.')
+                changes.append(f'Исправлены только окончания {len(staged)} пунктов явного перечисления по приложению Д; внутренние предложения, слова и регистр сохранены.')
 
 
 def process(model, changes, issues, check_only=False):
