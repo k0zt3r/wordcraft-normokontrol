@@ -2,6 +2,7 @@
 import re
 
 MARKER = re.compile(r'^\s*(?:[-–—]\s+|\d+[.)]\s+|[а-яё]\)\s+)', re.I)
+COMMON_STARTS = set('шифрование контроль обучение резервное регулярное регулярно установка установить проведение провести разработка разработать использование использовать обеспечение обеспечить ограничение ограничить организация организовать проверка проверить рассмотреть изучить оценить определить выявить анализ анализировать рассмотрение изучение оценка определение отсутствие недостаточное недостаточные преднамеренные непреднамеренные мониторинг многофакторная сотрудничать выбрать выбор повышение повышать признание вовлечение мотивационные бонусы карьерные шпионаж вымогательство злоупотребление некорректное неосторожное несанкционированное небрежное несоблюдение избыточные неправильное уязвимости сетевые политики политика процедуры основы примеры информирование поддержка'.split())
 
 
 def initial_abbreviation(text):
@@ -101,7 +102,7 @@ def format_simple(model, changes, issues, check_only=False):
         clusters.append(current)
     for cluster in clusters:
         first, last = cluster[0][0], cluster[-1][0]
-        if len(cluster) < 2 or first <= start:
+        if first <= start:
             continue
         intro = body[first - 1]
         dash_list = all(entry[0] == ('manual', 'dash') for _, entry in cluster)
@@ -110,41 +111,48 @@ def format_simple(model, changes, issues, check_only=False):
                       and not intro.get('objects') and intro.get('text', '').rstrip().endswith(':'))
         # Do not turn one side of a mixed-ID/marker list into an independent
         # simple group, and never look backwards across a blank paragraph.
-        if ((not dash_list and not introduced)
-                or (last + 1 < len(body) and _list_entry(model, body[last + 1]))):
+        explicit = dash_list or all(entry[0][0] == 'native' for _, entry in cluster)
+        if not explicit and not introduced:
             continue
-        if len({entry[1] for _, entry in cluster}) != 1:
+        if len(cluster) < 2 and not introduced:
             continue
         staged = []
-        safe = True
-        for order, (i, (_, _, content)) in enumerate(cluster):
+        lowered = 0
+        for order, (i, (_, depth, content)) in enumerate(cluster):
             p = body[i]
-            if (not content or content.endswith(':')
+            if (not content
                     or p.get('fields') or any(o.get('type') not in {'bookmarkStart', 'bookmarkEnd'} for o in p.get('objects', []))
                     or any(c in p.get('text', '') for c in '\n\r\f\t')
-                    or content.endswith(('!', '?', '…', '"', "'", '»', '”', '’', ')', ']', '}'))
-                    or content.endswith(('..', ';;'))
-                    or re.search(r'(?:[A-Za-zА-Яа-яЁё]\.){2,}$|(?:\s|^)[A-ZА-ЯЁ]\.$', content)):
-                safe = False
-                break
+                    or content.endswith(('!', '?', '…', '"', "'", '»', '”', '’', '..', ';;'))):
+                continue
+            updated = p
             text = p['text']
             end = len(text)
             while end and (text[end - 1].isspace() or text[end - 1] == '\ufffc'):
                 end -= 1
-            ending = ';' if order < len(cluster) - 1 else '.'
-            if not end or text[end - 1] == ending:
-                continue
-            begin = end - 1 if text[end - 1] in ';.' else end
-            updated = _terminal_edit(p, begin, end, ending)
-            if updated is None:
-                safe = False
-                break
-            staged.append((i, updated))
-        if safe:
-            for i, updated in staged:
-                body[i] = updated
-            if staged:
-                changes.append(f'Исправлены только окончания {len(staged)} пунктов явного перечисления по приложению Д; внутренние предложения, слова и регистр сохранены.')
+            following = next((entry for _, entry in cluster[order + 1:] if entry[1] <= depth), None)
+            ending = ';' if following else '.'
+            if end and text[end - 1] != ':' and text[end - 1] != ending:
+                begin = end - 1 if text[end - 1] in ';.' else end
+                updated = _terminal_edit(p, begin, end, ending)
+                if updated is None:
+                    continue
+            word = re.match(r'[А-ЯЁа-яё]+', content)
+            if word and word[0][0].isupper() and not word[0].isupper() and word[0].lower() in COMMON_STARTS:
+                visible_start = len(updated['text']) - len(updated['text'].lstrip(' \t\ufffc'))
+                marker = MARKER.match(updated['text'][visible_start:])
+                if marker:
+                    visible_start += marker.end()
+                candidate = _terminal_edit(updated, visible_start, visible_start + 1, word[0][0].lower())
+                if candidate is not None:
+                    updated = candidate
+                    lowered += 1
+            if updated is not p:
+                staged.append((i, updated))
+        for i, updated in staged:
+            body[i] = updated
+        if staged:
+            changes.append(f'Оформлены {len(staged)} пунктов явного перечисления по приложению Д: завершающие знаки и {lowered} известных нарицательных начал со строчной буквы. Внутренние предложения и уровни сохранены.')
 
 
 def process(model, changes, issues, check_only=False):
