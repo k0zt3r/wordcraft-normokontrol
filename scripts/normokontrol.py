@@ -549,9 +549,11 @@ def apply_frames(model, metadata, changes, issues):
             model["parts"][str(part_id)]["body"] = {"inset": [0, 0, 0, 0], "anchor": "center"}
         return part_id
     def text_part(text, size=STAMP_SIZE, field=None):
+        # Stamp cells must not inherit body indents from the Normal style.
         p = {"kind": "para", "text": "\ufffc" if field else text,
              "runs": [{"len": 3 if field else byte_len(text), "props": {}}],
              "props": {"align": "center", "spaceBefore": 0.0, "spaceAfter": 0.0,
+                       "indentLeft": 0.0, "indentRight": 0.0, "indentFirst": 0.0,
                        "lineSpacing": {"rule": "multiple", "value": 1.0}}}
         font(p, size)
         p['mark'].update(font=STAMP_FONT,fontCs=STAMP_FONT,fontEa=STAMP_FONT)
