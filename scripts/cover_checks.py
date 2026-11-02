@@ -122,6 +122,23 @@ def format_cover(model, changes):
             for row in block.get('rows',[]):
                 row.setdefault('props',{}).pop('height',None)
                 row['props'].pop('heightRule',None)
+    # Keep one body-line gap above the cover's author/supervisor table.
+    # Cover paragraph spacing is reset above, so this does not accumulate.
+    for i, block in enumerate(model['body'][:start]):
+        if block.get('kind') != 'table' or i == 0:
+            continue
+        labels = ' '.join(norm(p.get('text', '')) for _, p in paragraphs([block]))
+        if not any(role in labels for role in ('выполнил', 'студент', 'разработал')):
+            continue
+        previous = next((p for p in reversed(model['body'][:i])
+                         if p.get('kind') == 'para' and p.get('text', '').strip()), None)
+        if previous is not None:
+            props = previous.setdefault('props', {})
+            gap = PROFILE['text_size'] * PROFILE['line_spacing']
+            props['spaceAfter'] = float(props.get('spaceAfter') or 0) + gap
+            props['spaceAfterAuto'] = False
+            props['keepNext'] = True
+            changes.append('Перед блоком студента и руководителя на титульнике сохранён интервал не менее одной строки.')
     changes.append('Оформлен существующий титульник: устранены избыточные интервалы, вид работы начинается с заглавной буквы; реквизиты сохранены.')
 
 
