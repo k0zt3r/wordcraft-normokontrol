@@ -8,17 +8,21 @@ def code(value):
 
 
 def prepare(model,changes,issues):
-    from normokontrol import norm,paragraphs,body_start,REG_NUMBER_RE,add_issue,NUMBERED_HEADING,UNNUMBERED_CHAPTERS
+    from normokontrol import norm,paragraphs,body_start,REG_NUMBER_RE,add_issue,NUMBERED_HEADING,UNNUMBERED_CHAPTERS,SPECIAL,effective_para
     from structure import analyze
     from text_edits import replace
     structure=analyze(model)
+    start_body=body_start(model)
     chapter=None
     for i,p in enumerate(model['body']):
         if p['kind']!='para':continue
         raw=p.get('text','')
         text=norm(raw)
         level=structure['levels'].get(i)
-        if level and i>=body_start(model) and i not in structure['toc']:
+        if level and i>=start_body and i not in structure['toc']:
+            if text in SPECIAL and effective_para(model,p).get('numbering'):
+                p.setdefault('props',{})['numbering']={'num':0,'level':0}
+                changes.append(f'У структурного заголовка «{raw}» снята автоматическая нумерация списка.')
             explicit=re.match(r'^глава\s+(\d+)[.]?\s+',text)
             manual=NUMBERED_HEADING.match(text)
             number=structure['numbers'].get(i)
@@ -41,10 +45,10 @@ def prepare(model,changes,issues):
                     if number!=structure['numbers'].get(i):
                         add_issue(issues,'heading-reference-review','Исправлена принадлежность подраздела главе. Проверьте ссылки на старые номера; неоднозначные ссылки автоматически не заменяются.')
         if text=='список литературы':
-            start=raw.lower().find('список литературы')
+            start=p['text'].lower().find('список литературы')
             if start>=0 and replace(p,start,start+len('список литературы'),'Список использованных источников'):
                 changes.append('Заголовок «Список литературы» заменён на «Список использованных источников» (§6.10).')
-    for _,p in paragraphs(model['body'][:body_start(model)]):
+    for _,p in paragraphs(model['body'][:start_body]):
         for match in reversed(list(REG_NUMBER_RE.finditer(p.get('text','')))):
             corrected=code(match[0])
             if corrected!=match[0] and replace(p,match.start(),match.end(),corrected):

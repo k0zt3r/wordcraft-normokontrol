@@ -28,9 +28,12 @@ def references_for(message):
 
 
 def change_details(changes):
-    return [{'number':i,'text':text,'references':references_for(text),
-             'basis':'Применение указанного пункта; технические величины не являются цитатой нормы.' if references_for(text) else 'Техническое изменение; прямой пункт положения не установлен.'}
-            for i,text in enumerate(changes,1)]
+    result=[]
+    for i,text in enumerate(changes,1):
+        refs=references_for(text)
+        result.append({'number':i,'text':text,'references':refs,
+                       'basis':'Применение указанного пункта; технические величины не являются цитатой нормы.' if refs else 'Техническое изменение; прямой пункт положения не установлен.'})
+    return result
 
 
 def anchor(ref):
@@ -52,16 +55,25 @@ def render_changes(changes):
 
 def render_sources(messages):
     refs=list(dict.fromkeys(ref for message in messages for ref in references_for(message)))
-    clauses=json.loads((ROOT/'references/norm-source/clauses.json').read_text(encoding='utf-8'))
-    pages=json.loads((ROOT/'references/norm-source/source.json').read_text(encoding='utf-8'))['pages']
+    if not refs:
+        return ''
+    clauses={}
+    for clause in json.loads((ROOT/'references/norm-source/clauses.json').read_text(encoding='utf-8')):
+        if clause['page']>5:
+            clauses.setdefault(clause['clause'],clause)
+    # Reports need page text, not the much larger font/geometry extraction.
+    full_text=(ROOT/'references/norm-source/full-text.md').read_text(encoding='utf-8')
+    headings=list(re.finditer(r'(?m)^## Страница PDF (\d+)$',full_text))
+    pages={int(match[1]):full_text[match.end():headings[i+1].start() if i+1<len(headings) else len(full_text)].strip()
+           for i,match in enumerate(headings)}
     appendix_pages={'Б':33,'Г':36,'Д':37,'Е':39,'И':44,'К':46}
     result=[]
     for ref in refs:
         if ref.startswith('Приложение '):
             number=appendix_pages.get(ref[-1])
-            text=pages[number-1]['text'] if number else None
+            text=pages.get(number)
         else:
-            clause=next((c for c in clauses if c['clause']==ref and c['page']>5),None)
+            clause=clauses.get(ref)
             number=clause['page'] if clause else None
             text=clause['text'] if clause else None
         if text:

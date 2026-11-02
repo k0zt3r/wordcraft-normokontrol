@@ -96,13 +96,14 @@ class FigureLayoutTests(unittest.TestCase):
     def test_wordcraft_roundtrip_preserves_picture_grid_and_caption_sequence(self):
         from docx import Document
         from docx.shared import Inches
-        from PIL import Image
         from normokontrol import inventory
         import pymupdf
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             image=root/'sample.png'
-            Image.new('RGB',(240,120),'#123456').save(image)
+            bitmap=pymupdf.Pixmap(pymupdf.csRGB,pymupdf.IRect(0,0,240,120),False)
+            bitmap.clear_with(128)
+            bitmap.save(image)
             doc=Document();doc.add_heading('Введение',1)
             doc.add_paragraph('Результаты показаны на рисунках 1–3.')
             grid=doc.add_table(rows=1,cols=2)

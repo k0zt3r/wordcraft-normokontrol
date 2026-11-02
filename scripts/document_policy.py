@@ -1,4 +1,4 @@
-"""Document requirements depend on the explicit work type, not one universal list."""
+"""Work-type labels and the common structural requirements of the regulation."""
 import re
 
 

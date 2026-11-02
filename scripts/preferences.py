@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 from atomic_files import write_json
-from format_profile import ROOT, LOCAL_PATH, PROFILE, BOUNDS, validate
+from format_profile import ROOT, LOCAL_PATH, PROFILE, validate
 
 SETTINGS_PATH=ROOT/'.normokontrol-settings.json'
 

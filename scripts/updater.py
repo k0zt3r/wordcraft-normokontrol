@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REQUIRED = ('VERSION','run.cmd','normokontrol.py','_normokontrol_recovery.py','requirements.txt',
             'Normokontrol.pdf','references/norm-source/requirements.json',
             'references/norm-source/source.json','references/norm-source/clauses.json',
+            'references/norm-source/full-text.md',
             'assets/course-templates.json','assets/format-profile.json',
             *('scripts/'+name+'.py' for name in ('normokontrol','normokontrol_gui','irgups_data','captions',
                'list_formatting','whitespace_cleanup','document_cleanup','rules_checks','structure',

@@ -309,7 +309,10 @@ def auto_toc_text(body):
             result[tuple(path)] = ''
             continue
         generated = False
-        objects = iter(para.get('objects', []))
+        objects = para.get('objects', [])
+        if not any(stack) and not any(o.get('type') in {'field','fieldStart','fieldEnd'} for o in objects):
+            continue  # Ordinary text cannot open, close or belong to a TOC field.
+        objects = iter(objects)
         outside = []
         touched = any(stack)
         for char in para.get('text', ''):
@@ -757,7 +760,7 @@ def body_start(model):
         return min(heading, toc) if heading is not None else toc
     if heading is not None:
         return heading
-    return next((i + 1 for i, b in enumerate(body[:-1]) if b.get("section")), 0)
+    return next((i + 1 for i, b in enumerate(body) if b.get("section")), 0)
 
 
 def fill_cover(model, metadata, changes):
@@ -942,26 +945,23 @@ def stable_text(model, toc):
     return result
 
 
-def table_positions(wc, index, table):
+def table_start_page(wc, index, table):
     rows = table.get("rows", [])
     if not rows:
-        return []
+        return None
     positions = []
-    # First row establishes the beginning; every last-row cell covers uneven row content.
-    for ri in sorted({0, len(rows) - 1}):
-        for ci, cell in enumerate(rows[ri]["cells"]):
-            ps = list(paragraphs(cell["blocks"], (index, ri, ci)))
-            if ps:
-                path, para = ps[0] if ri == 0 else ps[-1]
-                off = 0 if ri == 0 else byte_len(para.get("text", ""))
-                positions.append(wc.locate(path, off))
-    return positions
+    # Splitting between rows is allowed: only the beginning must follow the caption.
+    for ci,cell in enumerate(rows[0]['cells']):
+        first=next(paragraphs(cell['blocks'],(index,0,ci)),None)
+        if first:
+            positions.append(wc.locate(first[0])['page'])
+    return min(positions,default=None)
 
 
 def repair_layout(wc, model, mode, changes, issues, do_fix=True):
     body = model["body"]
     forced = set()
-    for pass_no in range(4):
+    for _ in range(4):
         changed = False
         for i, table in enumerate(body):
             if table["kind"] != "table":
@@ -969,13 +969,11 @@ def repair_layout(wc, model, mode, changes, issues, do_fix=True):
             caption = table_caption(body, i)
             if caption is None:
                 continue  # TOC, bibliography and title/layout tables may span pages.
-            positions = table_positions(wc, i, table)
-            if not positions:
+            first_page = table_start_page(wc, i, table)
+            if first_page is None:
                 continue
             caption_pos = wc.locate([caption])
-            pages = {p["page"] for p in positions}
-            split = len(pages) > 1
-            detached = caption_pos["page"] != min(pages)
+            detached = caption_pos["page"] != first_page
             if detached:
                 if do_fix and caption not in forced:
                     wc.break_before(caption)
@@ -983,8 +981,7 @@ def repair_layout(wc, model, mode, changes, issues, do_fix=True):
                     changes.append(f"Явный перенос перед «{body[caption]['text']}» по фактической вёрстке.")
                     changed = True
                 elif not changed:
-                    why = "занимает несколько страниц; требуется деление по смыслу" if split else "оторвана от названия"
-                    add_issue(issues, "table-layout", f"{body[caption]['text']}: таблица {why}.", caption_pos["page"])
+                    add_issue(issues, "table-layout", f"{body[caption]['text']}: начало таблицы находится на другой странице.", caption_pos["page"])
         if not changed:
             break
     # Figure paragraphs: don't detach captions from directly preceding inline images.
@@ -1024,7 +1021,7 @@ def update_toc(wc, model, issues, do_fix=True):
         if len(wc.execute("document.layout")["pages"]) > 10:
             add_issue(issues, "toc-missing", "Не найдено содержание в виде таблицы из двух или четырёх столбцов.")
         return
-    body, styles = model["body"], model.get("styles", {})
+    body = model["body"]
     heads = {}
     for i, para in enumerate(body):
         if i in structure['levels'] and norm(para.get("text", "")) != "содержание":
@@ -1335,7 +1332,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             from integrity import check_import, preserving
             check_import(source, model)
             initial_tables = sum(b["kind"] == "table" for b in model["body"])
-            original_pages=len(wc.execute('document.layout')['pages'])
+            original_pages=len(wc.execute('document.layout')['pages']) if mode=='full' and not check_only else 0
             if not check_only:
                 if mode == "full":
                     fill_cover(model, metadata, changes)
@@ -1369,10 +1366,11 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             fill_captions(model, changes, issues, check_only=check_only)
             expected_text = stable_text(model, detect_toc(model["body"]))
             expected_tables = original["tables"] + sum(b["kind"] == "table" for b in model["body"]) - initial_tables
+            has_body=next_block(model['body'],body_start(model)-1)[0] is not None
             if mode == "full" and not check_only:
                 progress("Строю рамки и штампы с точными стыками…")
                 preserving(model, apply_frames, metadata, changes, issues)
-            if format_text and not check_only:
+            if format_text and not check_only and (mode!='full' or has_body):
                 preserving(model, normalize_model, mode, changes, heading_gap=heading_gap)
                 changes.append(f'Расстояние после заголовков: добавлен один измеренный шаг строк Wordcraft ({heading_gap:.2f} пт); для заголовка перед обычным текстом суммарно два шага без пустого абзаца (приложение Е).')
             if not check_only:
@@ -1382,8 +1380,9 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 from cover_checks import position
                 position(wc,model,temp,changes,issues,do_fix=not check_only and format_text)
                 start=body_start(model)
-                start_path=block_path(model['body'],start) if start<len(model['body']) else None
-                if not check_only and start_path is not None and wc.locate(start_path)['page']!=2:
+                first,_=next_block(model['body'],start-1)
+                start_path=block_path(model['body'],first) if first is not None else None
+                if not check_only and has_body and start_path is not None and wc.locate(start_path)['page']!=2:
                     raise RuntimeError('Титульный лист не помещается на одной странице. Сократите реквизиты или интервалы; большой штамп должен находиться на второй странице.')
             expected_sections = 1 + sum(bool(b.get("section")) for b in model["body"])
             progress("Проверяю переносы таблиц и рисунков…")

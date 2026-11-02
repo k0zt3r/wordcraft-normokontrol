@@ -15,7 +15,7 @@ def initial_abbreviation(text):
 
 def process(model, changes, issues, check_only=False):
     from text_edits import replace
-    from normokontrol import body_start, effective_para, effective_char, visible_text_runs, norm, add_issue, byte_len
+    from normokontrol import body_start, effective_para, effective_char, visible_text_runs, norm, add_issue
     from structure import analyze
     structure=analyze(model)
     body=model['body']

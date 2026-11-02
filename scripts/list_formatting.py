@@ -1,6 +1,5 @@
 """Normalize list definitions as well as paragraph-level indentation."""
 import copy
-import re
 
 
 def normalize(model, para, heading, cache):

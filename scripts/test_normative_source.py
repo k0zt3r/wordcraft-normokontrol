@@ -8,6 +8,20 @@ from normative import prepare,code
 
 
 class NormativeTests(unittest.TestCase):
+    def test_native_list_cannot_number_structural_titles_or_corrupt_source_heading(self):
+        from structure import analyze
+        titles=['Введение','Заключение','Список литературы']
+        model={'body':[{'kind':'para','text':text,'runs':[{'len':byte_len(text)}],
+                        'props':{'style':'List'}} for text in titles],
+               'styles':{'styles':[{'id':'List','para':{'numbering':{'num':1,'level':0}}}]},
+               'numbering':{'nums':[{'id':1,'abstractId':1}],
+                            'abstracts':[{'id':1,'levels':[{'format':'decimal','text':'%1.'}]}]}}
+        self.assertEqual(analyze(model)['numbers'],{})
+        prepare(model,[],[])
+        self.assertEqual([p['text'] for p in model['body']],
+                         ['Введение','Заключение','Список использованных источников'])
+        self.assertTrue(all(p['props']['numbering']['num']==0 for p in model['body']))
+
     def test_report_numbers_changes_and_links_actual_clauses(self):
         import re
         from reporting import render_changes,render_sources,change_details,severity

@@ -135,6 +135,15 @@ class NormokontrolTests(unittest.TestCase):
         para = {'kind': 'para', 'text': 'До\ufffcстарые строки\ufffcПосле',
                 'objects': [{'type': 'fieldStart', 'instr': 'TOC'}, {'type': 'fieldEnd'}]}
         self.assertEqual(nk.auto_toc_text([para])[(0,)], 'ДоПосле')
+        nested=[{'kind':'para','text':'\ufffc','objects':[{'type':'fieldStart','instr':'PAGE'}]},
+                {'kind':'para','text':'Обычный текст вне TOC'},
+                {'kind':'para','text':'\ufffcСтроки TOC\ufffcПосле',
+                 'objects':[{'type':'fieldStart','instr':'TOC'},{'type':'fieldEnd'}]},
+                {'kind':'para','text':'\ufffc','objects':[{'type':'fieldEnd'}]}]
+        self.assertEqual(nk.auto_toc_text(nested),{(2,):'После'})
+        with self.assertRaises(ValueError):
+            nk.auto_toc_text([{'kind':'para','text':'\ufffcНе закрыто',
+                              'objects':[{'type':'fieldStart','instr':'TOC'}]}])
 
     def test_manual_indent_runs_and_year_without_comma(self):
         p = {'kind': 'para', 'text': '  Текст', 'runs': [{'len': 2}, {'len': 10}]}
@@ -334,6 +343,11 @@ class NormokontrolTests(unittest.TestCase):
                 self.assertFalse(cell.paragraphs[1].text)
                 self.assertFalse(cell.paragraphs[2].text)
             self.assertEqual(report['pages'], 3)
+            empty=nk.create_document(Path(directory)/'blank-no-options',cli=cli,progress=lambda _:None)
+            self.assertTrue(empty['created_from_template'])
+            self.assertTrue((Path(directory)/'blank-no-options'/empty['docx_name']).is_file())
+            empty_doc=Document(Path(directory)/'blank-no-options'/empty['docx_name'])
+            self.assertFalse(any(p.text.startswith('Таблица ') for p in empty_doc.paragraphs))
             filled = nk.create_document(Path(directory) / 'filled', cli=cli, toc_template=True,
                         bibliography_template=True, metadata={'author':'Иванов И.И.', 'group':'БИ.4-23-1',
                         'supervisor':'Петров П.П.', 'supervisor_title':'доцент, к.т.н.', 'title':'Тестовая работа',

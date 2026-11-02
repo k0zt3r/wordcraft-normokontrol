@@ -21,7 +21,7 @@ def cover_end(model):
 
 
 def analyze(model):
-    from normokontrol import norm, heading_level, effective_para, NUMBERED_HEADING, detect_tocs, paragraphs, manual_toc_indices
+    from normokontrol import norm, heading_level, effective_para, NUMBERED_HEADING, detect_tocs, paragraphs, manual_toc_indices, SPECIAL
     body = model['body']
     styles = model.get('styles', {})
     numbering = model.get('numbering', {})
@@ -53,6 +53,8 @@ def analyze(model):
         if level is None:
             continue
         levels[i] = level
+        if text in SPECIAL:
+            continue
         if chapter:
             number = (int(chapter[1]),)
         elif manual:

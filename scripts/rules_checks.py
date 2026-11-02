@@ -7,8 +7,8 @@ def check_rules(model, mode, issues, heading_gap=None):
     from structure import analyze
     structure = analyze(model)
     from normokontrol import (body_start, paragraphs, effective_para, effective_char,
-                             visible_text_runs, heading_level, CAPTION, auto_toc_text,
-                             detect_tocs, norm, MM, add_issue, NUMBERED_HEADING)
+                             visible_text_runs, CAPTION, auto_toc_text,
+                             norm, MM, add_issue, NUMBERED_HEADING)
     body = model['body']
     bibliography=False
     for block in body:
