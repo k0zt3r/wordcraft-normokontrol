@@ -13,6 +13,17 @@ from text_edits import replace
 
 
 class CoverListTests(unittest.TestCase):
+    def test_sentences_in_list_after_colon(self):
+        model={'body':[p('Введение'),p('Приоритетные меры защиты:'),
+                       p('- Шифрование данных. Для защиты клиентов.'),p('- Контроль доступа. Для ограничения доступа.'),
+                       p('- Обучение сотрудников. Для защиты информации.'),p('- Резервное копирование данных.')],'styles':{}}
+        process(model,[],[])
+        self.assertEqual(model['body'][2]['text'],'- шифрование данных. Для защиты клиентов;')
+        self.assertEqual(model['body'][-1]['text'],'- резервное копирование данных.')
+        original=copy.deepcopy(model)
+        process(model,[],[])
+        self.assertEqual(model,original)
+
     def test_cover_boundary_stops_before_images(self):
         from structure import cover_end
         model={'body':[p('Курсовая работа'),p('Иркутск 2026'),p('\f'),

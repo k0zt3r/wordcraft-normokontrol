@@ -93,12 +93,20 @@ def format_cover(model, changes):
                 props['align']='center'
         if text.startswith('кафедра'):
             props['spaceAfter']=PROFILE['cover_department_gap_pt']
+        if text.startswith('факультет'):
+            props['spaceBefore']=12.0
         if text in kinds:
-            props['spaceAfter']=6.0
+            props.update(spaceBefore=24.0,spaceAfter=12.0)
             raw=p['text']
             index=next((i for i,c in enumerate(raw) if c.isalpha()),None)
             if index is not None and raw[index].islower():
                 p['text']=raw[:index]+raw[index].upper()+raw[index+1:]
+        if text.startswith('по дисциплине'):
+            props['spaceAfter']=12.0
+        if re.match(r'^(?:кр|кп|др|дп|лр|уп|пп|оп|ргр)\.\d',text):
+            props.update(spaceBefore=12.0,spaceAfter=24.0)
+        if len(path)>1:
+            props['lineSpacing']={'rule':'multiple','value':1.15}
         for r in p.get('runs',[]):
             r.setdefault('props',{}).update(italic=False,italicCs=False)
         p.setdefault('mark',{}).update(italic=False,italicCs=False)

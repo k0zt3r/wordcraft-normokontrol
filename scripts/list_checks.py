@@ -2,6 +2,7 @@
 import re
 
 MARKER = re.compile(r'^\s*(?:[-–—]\s+|\d+[.)]\s+|[а-яё]\)\s+)', re.I)
+COMMON_STARTS=set('шифрование контроль обучение резервное регулярное регулярно установка установить проведение провести разработка разработать использование использовать обеспечение обеспечить ограничение ограничить организация организовать проверка проверить рассмотреть изучить оценить определить выявить анализ анализировать рассмотрение изучение оценка определение отсутствие недостаточное недостаточные преднамеренные непреднамеренные мониторинг многофакторная сотрудничать выбрать выбор повышение повышать признание вовлечение мотивационные бонусы карьерные'.split())
 
 
 def process(model, changes, issues, check_only=False):
@@ -44,8 +45,6 @@ def process(model, changes, issues, check_only=False):
             add_issue(issues,'list-marker','Автоматическое цифровое перечисление следует оформлять номером со скобкой (§7.2.7).')
         visible=raw.replace('\ufffc','').strip()
         content=MARKER.sub('',visible,count=1) if manual else visible
-        if content and content[0].isupper():
-            add_issue(issues,'list-case-review',f'Проверьте строчную букву в перечислении (приложение Д); имена собственные и аббревиатуры сохраняются: {visible[:100]}')
         runs=list(visible_text_runs(p))
         if runs and all(effective_char(model,p,r).get('italic') for r,_ in runs):
             add_issue(issues,'list-italic-review',f'Весь пункт выделен курсивом: проверьте обоснованность по §7.1.3 и приложению Д: {visible[:100]}')
@@ -59,17 +58,29 @@ def process(model, changes, issues, check_only=False):
         current.append((i,level,content))
     finish()
     for cluster in clusters:
-        if len(cluster)<2:
-            continue  # Isolated labels followed by prose need human interpretation.
+        first=cluster[0][0]
+        previous=next((b for b in reversed(body[start:first]) if norm(b.get('text',''))),None)
+        introduced=bool(previous and previous['kind']=='para' and norm(previous.get('text','')).endswith(':'))
         for k,(i,depth,content) in enumerate(cluster):
             p=body[i]
+            if content and content[0].isupper():
+                word=re.match(r'[А-ЯЁа-яё]+',content)
+                if introduced and word and word[0].lower() in COMMON_STARTS and not word[0].isupper() and not check_only:
+                    raw=p['text']
+                    offset=raw.find(word[0])
+                    if offset>=0 and replace(p,offset,offset+1,word[0][0].lower()):
+                        changes.append('Пункт перечисления после двоеточия начат со строчной буквы.')
+                else:
+                    add_issue(issues,'list-case-review',f'Проверьте строчную букву в перечислении; имена собственные и аббревиатуры сохраняются: {content[:100]}')
+            if len(cluster)<2 and not introduced:
+                continue
             following=next((item for item in cluster[k+1:] if item[1]<=depth),None)
             ending=';' if following else '.'
             text=p.get('text','')
             if content.rstrip().endswith(':'):
                 continue  # Parent item introducing nested children.
             complex_objects=any(o.get('type') not in {'bookmarkStart','bookmarkEnd'} for o in p.get('objects',[]))
-            if not content or re.search(r'[.!?]\s+\S',content) or complex_objects or p.get('fields'):
+            if not content or (re.search(r'[.!?]\s+\S',content) and not introduced) or complex_objects or p.get('fields'):
                 add_issue(issues,'list-punctuation-review',f'Проверьте окончание пункта перечисления; ожидается «{ending}» с учётом вложенности: {content[:100]}')
                 continue
             end=len(text)
