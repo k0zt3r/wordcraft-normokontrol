@@ -3,13 +3,11 @@ import re
 
 
 def check(model,issues):
-    from normokontrol import norm,add_issue,detect_tocs
-    excluded=set(detect_tocs(model['body']))
+    from normokontrol import norm,add_issue
+    from captions import caption_paragraphs
     seen=set()
     last={}
-    for i,p in enumerate(model['body']):
-        if i in excluded or p['kind']!='para':
-            continue
+    for _,p in caption_paragraphs(model):
         text=norm(p.get('text',''))
         match=re.match(r'^(рисунок|таблица)\s+((?:[а-яa-z]\.)?\d+(?:\.\d+)*)(?:\s|[–—-]|$)',text)
         if not match:

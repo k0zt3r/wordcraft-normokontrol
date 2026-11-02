@@ -5,6 +5,14 @@ MARKER = re.compile(r'^\s*(?:[-–—]\s+|\d+[.)]\s+|[а-яё]\)\s+)', re.I)
 COMMON_STARTS=set('шифрование контроль обучение резервное регулярное регулярно установка установить проведение провести разработка разработать использование использовать обеспечение обеспечить ограничение ограничить организация организовать проверка проверить рассмотреть изучить оценить определить выявить анализ анализировать рассмотрение изучение оценка определение отсутствие недостаточное недостаточные преднамеренные непреднамеренные мониторинг многофакторная сотрудничать выбрать выбор повышение повышать признание вовлечение мотивационные бонусы карьерные'.split())
 
 
+def initial_abbreviation(text):
+    token=re.match(r'[A-Za-zА-ЯЁа-яё][A-Za-zА-ЯЁа-яё0-9_-]*',text)
+    if not token:
+        return False
+    word=token[0]
+    return sum(c.isalpha() for c in word)>=2 and word.isupper() and word.lower() not in COMMON_STARTS
+
+
 def process(model, changes, issues, check_only=False):
     from text_edits import replace
     from normokontrol import body_start, effective_para, effective_char, visible_text_runs, norm, add_issue, byte_len
@@ -63,7 +71,7 @@ def process(model, changes, issues, check_only=False):
         introduced=bool(previous and previous['kind']=='para' and norm(previous.get('text','')).endswith(':'))
         for k,(i,depth,content) in enumerate(cluster):
             p=body[i]
-            if content and content[0].isupper():
+            if content and content[0].isupper() and not initial_abbreviation(content):
                 word=re.match(r'[А-ЯЁа-яё]+',content)
                 if introduced and word and word[0].lower() in COMMON_STARTS and not word[0].isupper() and not check_only:
                     raw=p['text']

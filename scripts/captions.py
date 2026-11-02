@@ -2,6 +2,34 @@
 import re
 
 
+def is_figure_layout(block):
+    """A grid containing only graphics and their captions is page layout, not data."""
+    from normokontrol import paragraphs
+    if block.get('kind')!='table':
+        return False
+    graphics=False
+    for _,para in paragraphs([block]):
+        text=para.get('text','').replace('\ufffc','').strip()
+        objects=para.get('objects',[])
+        if any(o.get('type') in {'image','chart','smartArt','group'} for o in objects):
+            graphics=True
+        if text and not re.match(r'^Рисунок\s+(?:[А-ЯA-Z]\.)?\d+(?:\.\d+)*(?:\s|[–—-]|$)',text,re.I):
+            return False  # A data table may contain icons or other illustrations too.
+    return graphics
+
+
+def caption_paragraphs(model):
+    """Read captions in document order, including cells and nested tables."""
+    from normokontrol import paragraphs,detect_tocs,auto_toc_text,manual_toc_indices,body_start
+    body=model['body']
+    excluded=set(detect_tocs(body)) | manual_toc_indices(body)
+    automatic=auto_toc_text(body)
+    start=body_start(model)
+    for path,para in paragraphs(body):
+        if path[0]>=start and path[0] not in excluded and tuple(path) not in automatic:
+            yield path,para
+
+
 def fill_captions(model, changes, issues, check_only=False):
     from format_profile import PROFILE
     from normokontrol import (body_start, detect_tocs, auto_toc_text, norm,
@@ -13,7 +41,7 @@ def fill_captions(model, changes, issues, check_only=False):
     excluded = set(detect_tocs(body)) | {p[0] for p in auto_toc_text(body)}
     pattern = re.compile(r'^\s*(Рисунок|Таблица)(?:\s+(\d+(?:\.\d+)*|[А-ЯA-Z]\.\d+))?(?:\s*[—–-]\s*(.*))?\s*$', re.I)
     reserved = {'рисунок': set(), 'таблица': set()}
-    for b in body:
+    for _,b in caption_paragraphs(model):
         match = pattern.fullmatch(visible(b))
         if match and match[2] and match[2].isdigit():
             reserved[match[1].lower()].add(int(match[2]))
@@ -33,6 +61,8 @@ def fill_captions(model, changes, issues, check_only=False):
         kind = None
         caption_index = None
         if block['kind'] == 'table':
+            if is_figure_layout(block):
+                continue
             kind = 'таблица'
             prior = next((j for j in range(i - 1, -1, -1) if norm(body[j].get('text', '')) or body[j]['kind'] != 'para'), None)
             if prior is not None:

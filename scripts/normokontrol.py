@@ -433,12 +433,16 @@ def normalize_model(model, mode, changes, heading_gap=None):
                 props.update(align='left', indentFirst=PROFILE['body_indent_mm'] * MM, keepNext=False,
                              pageBreakBefore=False, outlineLevel=9)
         elif block["kind"] == "table":
+            from captions import is_figure_layout
+            figure_layout=is_figure_layout(block)
             caption = table_caption(body, i)
-            data_table = caption is not None
+            data_table = caption is not None and not figure_layout
             size = 12 if data_table else PROFILE['text_size']
             for ri, row in enumerate(block["rows"]):
                 rp = row.setdefault("props", {})
                 rp["cantSplit"] = True
+                if figure_layout:
+                    rp['header']=False
                 if data_table:
                     rp.update({"height": max(rp.get("height") or 0, 8 * MM), "heightRule": "atLeast"})
                     rp["header"] = ri == 0
@@ -448,6 +452,9 @@ def normalize_model(model, mode, changes, heading_gap=None):
                         pp = para.setdefault("props", {})
                         pp["lineSpacing"] = {"rule": "multiple", "value": PROFILE['line_spacing']}
                         pp["spaceAfter"] = 0.0
+                        if figure_layout:
+                            pp['lineSpacing']={'rule':'multiple','value':1.0 if has_image(para) else PROFILE['line_spacing']}
+                            pp['keepNext']=has_image(para)
                         if data_table:
                             pp["keepNext"] = False  # §7.6.7 permits splitting a table between rows.
             if i in structure['toc'] or (refs is not None and i > refs and not any(
@@ -1120,18 +1127,17 @@ def structural_checks(wc, model, mode, issues, heading_gap=None):
             tp = layout['pages'][1]
             if default_page and (tp.get("header"), tp.get("footer")) == (default_page.get("header"), default_page.get("footer")):
                 add_issue(issues, "large-stamp", "На второй и третьей страницах одинаковые колонтитулы: проверьте большой штамп на второй странице.")
-    for i, p in enumerate(body):
-        if (i,) in automatic_contents:
-            continue
-        if p["kind"] != "para":
-            continue
+    from captions import caption_paragraphs
+    for _,p in caption_paragraphs(model):
         text = p.get("text", "")
         match = CAPTION.match(norm(text))
         if match:
             number = match.group(2)
             if not reference_exists(reference_text, match.group(1), number):
                 add_issue(issues, "reference", f"Не найдена текстовая ссылка: {match.group(1)} {number}.")
-        if heading_level(p, model.get("styles", {}), model.get('numbering')) and text.rstrip().endswith("."):
+    for i,p in enumerate(body):
+        if p['kind']=='para' and (i,) not in automatic_contents and heading_level(p, model.get("styles", {}), model.get('numbering')) and p.get('text','').rstrip().endswith("."):
+            text=p['text']
             add_issue(issues, "heading-dot", f"Точка в конце заголовка: {text}")
     start = next((i for i, p in enumerate(body) if p["kind"] == "para" and
                   (norm(p.get("text", "")) in SPECIAL or heading_level(p, model.get("styles", {}), model.get('numbering')))), 0)
