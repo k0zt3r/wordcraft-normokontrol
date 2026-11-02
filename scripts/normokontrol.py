@@ -209,7 +209,7 @@ def heading_level(para, styles, numbering=None):
     if isinstance(index, int) and 0 <= index < len(levels):
         native = levels[index]
         tokens = re.findall(r'%([1-9])', native.get('text', ''))
-        if native.get('format') == 'decimal' and tokens and (level is not None or len(tokens) > 1):
+        if native.get('format') == 'decimal' and tokens and isinstance(level, int) and level < 9:
             return max(map(int, tokens))
     return level + 1 if isinstance(level, int) and level < 9 else None
 
@@ -308,6 +308,8 @@ def table_caption(body, index):
 
 
 def normalize_model(model, mode, changes):
+    from structure import analyze
+    structure = analyze(model)
     from list_formatting import normalize as normalize_list
     list_cache = {}
     body, styles = model["body"], model.get("styles", {})
@@ -325,7 +327,7 @@ def normalize_model(model, mode, changes):
         if block["kind"] == "para":
             if not norm(block.get("text", "")):
                 continue  # Preserve the user's deliberate title/page spacing.
-            level = heading_level(block, styles, model.get('numbering'))
+            level = structure['levels'].get(i)
             props = block.setdefault("props", {})
             font(block, 14)
             props.update({"lineSpacing": {"rule": "multiple", "value": 1.5}, "widowControl": True})
@@ -680,9 +682,9 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
 
 
 def body_start(model):
+    from structure import analyze
     body = model["body"]
-    heading = next((i for i, b in enumerate(body) if b["kind"] == "para" and
-                    (norm(b.get("text", "")) in SPECIAL or heading_level(b, model.get("styles", {}), model.get('numbering')))), None)
+    heading = next(iter(analyze(model)['levels']), None)
     toc = detect_toc(body)
     if toc is not None:
         return min(heading, toc) if heading is not None else toc
@@ -925,6 +927,8 @@ def add_issue(issues, code, message, page=None):
 
 
 def update_toc(wc, model, issues, do_fix=True):
+    from structure import analyze
+    structure = analyze(model)
     toc = detect_toc(model["body"])
     if toc is None:
         if auto_toc_text(model['body']):
@@ -936,8 +940,12 @@ def update_toc(wc, model, issues, do_fix=True):
     body, styles = model["body"], model.get("styles", {})
     heads = {}
     for i, para in enumerate(body):
-        if para["kind"] == "para" and heading_level(para, styles, model.get('numbering')) and norm(para.get("text", "")) != "содержание":
-            heads.setdefault(norm(para["text"]), []).append(i)
+        if i in structure['levels'] and norm(para.get("text", "")) != "содержание":
+            title = norm(para['text'])
+            heads.setdefault(title, []).append(i)
+            number = structure['numbers'].get(i)
+            if number and not NUMBERED_HEADING.match(title) and not title.startswith('глава '):
+                heads.setdefault('.'.join(map(str, number)) + ' ' + title, []).append(i)
     for _ in range(4):
         changed = False
         for toc in detect_tocs(body):
@@ -983,6 +991,10 @@ def structural_checks(wc, model, mode, issues):
     body = model["body"]
     automatic_contents = auto_toc_text(body)
     toc = detect_toc(body)
+    toc_tables = set(detect_tocs(body))
+    reference_text = "\n".join(p.get('text','') for path,p in paragraphs(body)
+                               if path[0] not in toc_tables and not CAPTION.match(norm(p.get('text','')))
+                               and tuple(path) not in automatic_contents)
     required = ("введение", "заключение", "список использованных источников") if mode == "full" else ()
     for title in required:
         accepted = {title, "библиографический список", "список литературы"} if title == "список использованных источников" else {title}
@@ -1028,10 +1040,7 @@ def structural_checks(wc, model, mode, issues):
         match = CAPTION.match(text)
         if match:
             number = match.group(2)
-            other = "\n".join(b.get("text", "") for path, b in paragraphs(body)
-                              if path != (i,) and path[0] not in detect_tocs(body)
-                              and not CAPTION.match(b.get("text", "")))
-            if not reference_exists(other, match.group(1), number):
+            if not reference_exists(reference_text, match.group(1), number):
                 add_issue(issues, "reference", f"Не найдена текстовая ссылка: {match.group(1)} {number}.")
         if heading_level(p, model.get("styles", {}), model.get('numbering')) and text.rstrip().endswith("."):
             add_issue(issues, "heading-dot", f"Точка в конце заголовка: {text}")
@@ -1218,6 +1227,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             model = json.loads((temp / "source.json").read_text(encoding="utf-8"))
             if not isinstance(model.get("body"), list) or not isinstance(model.get("parts"), dict):
                 raise RuntimeError("Версия формата Wordcraft не поддерживается: нет body/parts.")
+            from integrity import check_import, preserving
+            check_import(source, model)
             initial_tables = sum(b["kind"] == "table" for b in model["body"])
             if not check_only:
                 if mode == "full":
@@ -1228,17 +1239,17 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             from whitespace_cleanup import clean
             from document_cleanup import prepare
             if format_text or check_only:
-                prepare(model, changes, issues, check_only=check_only)
+                preserving(model, prepare, changes, issues, check_only=check_only)
             if format_text or check_only:
-                clean(model, changes, issues, check_only=check_only)
+                preserving(model, clean, changes, issues, check_only=check_only)
             fill_captions(model, changes, issues, check_only=check_only)
             expected_text = stable_text(model, detect_toc(model["body"]))
             expected_tables = original["tables"] + sum(b["kind"] == "table" for b in model["body"]) - initial_tables
             if mode == "full" and not check_only:
                 progress("Строю рамки и штампы с точными стыками…")
-                apply_frames(model, metadata, changes, issues)
+                preserving(model, apply_frames, metadata, changes, issues)
             if format_text and not check_only:
-                normalize_model(model, mode, changes)
+                preserving(model, normalize_model, mode, changes)
             if not check_only:
                 (temp / "formatted.json").write_text(json.dumps(model, ensure_ascii=False), encoding="utf-8")
                 wc.open(temp / "formatted.json")

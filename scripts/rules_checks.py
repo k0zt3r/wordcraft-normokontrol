@@ -3,6 +3,8 @@ import re
 
 
 def check_rules(model, mode, issues):
+    from structure import analyze
+    structure = analyze(model)
     from normokontrol import (body_start, paragraphs, effective_para, effective_char,
                              visible_text_runs, heading_level, CAPTION, auto_toc_text,
                              detect_tocs, norm, MM, add_issue, NUMBERED_HEADING)
@@ -21,7 +23,7 @@ def check_rules(model, mode, issues):
         if not norm(text):
             continue
         props = effective_para(model, para)
-        level = heading_level(para, model.get('styles', {}), model.get('numbering')) if len(path) == 1 else None
+        level = structure['levels'].get(path[0]) if len(path) == 1 else None
         if level:
             if level == 1 and (props.get('spaceAfter') or 0) < 28 - .1:
                 add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')
@@ -31,12 +33,12 @@ def check_rules(model, mode, issues):
                 if props.get('pageBreakBefore'):
                     add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}')
             match = NUMBERED_HEADING.match(text)
-            if match:
-                if match[2]:
+            number = structure['numbers'].get(path[0])
+            if number:
+                if match and match[2]:
                     add_issue(issues, 'heading-number-dot', f'Точка после номера заголовка (§7.2.2): {text}')
-                number = tuple(map(int, match[1].split('.')))
                 if number in headings:
-                    add_issue(issues, 'heading-number', f'Повтор номера раздела: {match[1]}.')
+                    add_issue(issues, 'heading-number', f'Повтор номера раздела: {".".join(map(str,number))}.')
                 parent = number[:-1]
                 previous = counters.get(parent, 0)
                 if number[-1] != previous + 1:
@@ -62,6 +64,8 @@ def check_rules(model, mode, issues):
                 add_issue(issues, 'text-color', f'Цвет текста отличается от чёрного (§7.1.3): {visible[:100]}')
     if mode != 'full':
         return
+    for index in structure['uncertain']:
+        add_issue(issues, 'heading-ambiguous', f'Неясно, глава это или пункт списка; принудительный перенос не добавлен: {body[index]["text"][:100]}')
     seen = set()
     first_refs = []
     for index, letter in appendices:
