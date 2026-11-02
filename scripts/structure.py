@@ -2,6 +2,24 @@
 import re
 
 
+def cover_end(model):
+    """Use the city/year as a boundary, not the first heading several sheets later."""
+    from normokontrol import norm, paragraphs, SPECIAL
+    body=model['body']
+    city=re.compile(r'^[а-яёa-z][а-яёa-z .-]*?,?\s+(?:19|20)\d{2}(?:\s*г\.?)?$')
+    for i,block in enumerate(body[:100]):
+        if block['kind']=='para' and norm(block.get('text','')) in SPECIAL:
+            return None
+        if any(city.fullmatch(norm(p.get('text',''))) for _,p in paragraphs([block])):
+            end=i+1
+            while end<len(body) and body[end]['kind']=='para' and not norm(body[end].get('text','')):
+                if any(o.get('type') not in {'bookmarkStart','bookmarkEnd'} for o in body[end].get('objects',[])):
+                    break
+                end+=1
+            return end
+    return None
+
+
 def analyze(model):
     from normokontrol import norm, heading_level, effective_para, NUMBERED_HEADING, detect_tocs, paragraphs
     body = model['body']

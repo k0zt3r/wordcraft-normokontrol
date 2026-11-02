@@ -10,6 +10,8 @@
   "stamp_size": 9,
   "stamp_code_size": 16,
   "frame_stroke_pt": 0.75,
+  "cover_department_gap_pt": 18,
+  "cover_bottom_mm": 20,
   "provenance": {
     "font": "Положение §7.1.3",
     "text_size": "Положение §7.1.3",
@@ -21,6 +23,8 @@
     "stamp_font": "Пользовательский образец",
     "stamp_size": "Пользовательский образец",
     "stamp_code_size": "Прямое указание пользователя, 02.11.2026",
-    "compact_indent_mm": "Профиль обычной учебной работы"
+    "compact_indent_mm": "Профиль обычной учебной работы",
+    "cover_department_gap_pt": "Компоновка по образцу; положение не задаёт конкретные 18 пт",
+    "cover_bottom_mm": "Компоновка города и года внизу по приложению Б; 20 мм — настройка профиля"
   }
 }

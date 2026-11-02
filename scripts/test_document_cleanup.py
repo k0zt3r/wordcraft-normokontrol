@@ -39,7 +39,7 @@ class CleanupTests(unittest.TestCase):
         normalize(model,p,None,{})
         level=model['numbering']['abstracts'][-1]['levels'][0]
         self.assertEqual(level['suffix'],'space')
-        self.assertEqual(level['text'],'%1.')
+        self.assertEqual(level['text'],'%1)')
         self.assertNotIn('tab',level)
 
     def test_bibliography_check_only_preserves_input(self):

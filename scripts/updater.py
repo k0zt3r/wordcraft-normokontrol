@@ -16,7 +16,8 @@ REQUIRED = ('VERSION','run.cmd','normokontrol.py','_normokontrol_recovery.py','r
             'assets/course-templates.json','assets/format-profile.json',
             *('scripts/'+name+'.py' for name in ('normokontrol','normokontrol_gui','irgups_data','captions',
                'list_formatting','whitespace_cleanup','document_cleanup','rules_checks','structure',
-               'integrity','format_profile','pdf_checks','atomic_files','runtime','reporting','preferences','updater')))
+               'integrity','format_profile','pdf_checks','atomic_files','runtime','reporting','preferences','cover_checks','list_checks','text_edits',
+               'artifact_cleanup','document_policy','illustration_checks','updater')))
 
 
 def fetch(url):

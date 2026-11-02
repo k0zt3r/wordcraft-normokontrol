@@ -33,7 +33,9 @@ def profile_dialog(root):
             'body_indent_mm':'Абзац, мм','compact_indent_mm':'Абзац обычной работы, мм',
             'chapter_gap_pt':'После главы, пт','subheading_gap_pt':'После подзаголовка, пт',
             'stamp_size':'Надписи штампа, пт','stamp_code_size':'Шифр в штампе, пт',
-            'frame_stroke_pt':'Толщина рамки, пт'}
+            'frame_stroke_pt':'Толщина рамки, пт',
+            'cover_department_gap_pt':'После кафедры на титульнике, пт',
+            'cover_bottom_mm':'Город и год: отступ снизу, мм'}
     values={}
     for row,(key,label) in enumerate(labels.items()):
         ttk.Label(dialog,text=label).grid(row=row,column=0,sticky='w',padx=12,pady=4)

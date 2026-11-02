@@ -361,7 +361,8 @@ class NormokontrolTests(unittest.TestCase):
                 self.assertEqual(len(pdf),6)
                 self.assertIn('Аннотация',pdf[1].get_text())
                 self.assertIn('Содержание',pdf[2].get_text())
-                self.assertIn('Листов',pdf[2].get_text())
+                self.assertIn('Листов',pdf[1].get_text())
+                self.assertNotIn('Листов',pdf[2].get_text())
                 self.assertIn('Нормативные ссылки',pdf[3].get_text())
                 self.assertIn('Обозначения и сокращения',pdf[4].get_text())
 

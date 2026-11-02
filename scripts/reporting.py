@@ -3,7 +3,8 @@ from collections import defaultdict
 import html
 
 ERRORS = {'structure','stamp-code','frame-missing','table-layout','figure-layout','toc-convergence'}
-REVIEW = {'bibliography-review','caption-review','caption-placeholder','heading-ambiguous','toc-auto-review','media'}
+REVIEW = {'bibliography-review','caption-review','caption-placeholder','heading-ambiguous','toc-auto-review','media',
+          'list-case-review','list-italic-review','list-punctuation-review','cover-discipline-review'}
 
 
 def severity(code):

@@ -7,12 +7,14 @@ def fill_captions(model, changes, issues, check_only=False):
     from normokontrol import (body_start, detect_tocs, auto_toc_text, norm,
                              next_block, paragraphs, byte_len, font, add_issue)
     body = model['body']
+    def visible(block):
+        return block.get('text','').replace('\ufffc','').strip()
     start = body_start(model)
     excluded = set(detect_tocs(body)) | {p[0] for p in auto_toc_text(body)}
     pattern = re.compile(r'^\s*(Рисунок|Таблица)(?:\s+(\d+(?:\.\d+)*|[А-ЯA-Z]\.\d+))?(?:\s*[—–-]\s*(.*))?\s*$', re.I)
     reserved = {'рисунок': set(), 'таблица': set()}
     for b in body:
-        match = pattern.fullmatch(b.get('text', ''))
+        match = pattern.fullmatch(visible(b))
         if match and match[2] and match[2].isdigit():
             reserved[match[1].lower()].add(int(match[2]))
     counters = {'рисунок': 0, 'таблица': 0}
@@ -34,7 +36,7 @@ def fill_captions(model, changes, issues, check_only=False):
             kind = 'таблица'
             prior = next((j for j in range(i - 1, -1, -1) if norm(body[j].get('text', '')) or body[j]['kind'] != 'para'), None)
             if prior is not None:
-                candidate = pattern.fullmatch(body[prior].get('text', ''))
+                candidate = pattern.fullmatch(visible(body[prior]))
                 if candidate and candidate[1].lower() == kind:
                     caption_index = prior
         elif block['kind'] == 'para' and any(o.get('type') in {'image', 'chart', 'smartArt'} for o in block.get('objects', [])):
@@ -44,20 +46,20 @@ def fill_captions(model, changes, issues, check_only=False):
                 continue
             kind = 'рисунок'
             j, following = next_block(body, i)
-            candidate = pattern.fullmatch(following.get('text', '')) if following else None
+            candidate = pattern.fullmatch(visible(following)) if following else None
             if candidate and candidate[1].lower() == kind:
                 caption_index = j
         if kind is None:
             continue
         counters[kind] += 1
-        match = pattern.fullmatch(body[caption_index].get('text', '')) if caption_index is not None else None
+        match = pattern.fullmatch(visible(body[caption_index])) if caption_index is not None else None
         if caption_index is None:
             if kind == 'таблица':
                 _, other = next_block(body, i)
             else:
                 prior = next((j for j in range(i - 1, -1, -1) if norm(body[j].get('text', '')) or body[j]['kind'] != 'para'), None)
                 other = body[prior] if prior is not None else None
-            wrong = pattern.fullmatch(other.get('text', '')) if other else None
+            wrong = pattern.fullmatch(visible(other)) if other else None
             if wrong and wrong[1].lower() == kind:
                 side = 'над рисунком; перенесите её под рисунок' if kind == 'рисунок' else 'под таблицей; перенесите её над таблицей'
                 add_issue(issues, 'caption-position', f'Подпись «{other["text"]}» расположена {side}.')

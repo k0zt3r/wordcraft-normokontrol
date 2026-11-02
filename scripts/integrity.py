@@ -49,6 +49,10 @@ def original_text(path):
                         field_stack.pop()
                 elif e.tag == W+'t' and not has_field and not field_stack:
                     result.append(e.text or '')
+                elif e.tag == W+'noBreakHyphen' and not has_field and not field_stack:
+                    result.append('\u2011')
+                elif e.tag == W+'softHyphen' and not has_field and not field_stack:
+                    result.append('\u00ad')
             return
         for child in node:
             visit(child)

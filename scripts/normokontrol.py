@@ -42,6 +42,7 @@ SPECIAL = {"содержание", "введение", "заключение", "
            "библиографический список", "список литературы", "аннотация", "нормативные ссылки", "обозначения и сокращения"}
 CAPTION = re.compile(r"^(Таблица|Рисунок)\s+([А-ЯA-Z\d]+(?:\.\d+)*)\s*[–—-]", re.I)
 NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+){0,3})(\.)?\s+\S")
+UNNUMBERED_CHAPTERS = {'теоретическая часть','практическая часть','теоретический раздел','практический раздел'}
 
 
 def norm(text):
@@ -206,9 +207,14 @@ def paragraphs(blocks, prefix=()):
                     yield from paragraphs(cell["blocks"], (*path, ri, ci))
 
 
+def block_path(body, index):
+    path=next((path for path,_ in paragraphs([body[index]])),[0])
+    return [index]+path[1:]
+
+
 def heading_level(para, styles, numbering=None):
     text = norm(para.get("text", ""))
-    if text in SPECIAL or re.fullmatch(r"приложение\s+(?:[а-яёa-z]|\d+)", text):
+    if text in SPECIAL | UNNUMBERED_CHAPTERS or re.fullmatch(r"приложение\s+(?:[а-яёa-z]|\d+)", text):
         return 1
     if re.match(r"^глава\s+(?:\d+|[ivxlcdm]+)(?:[.\s:–—-]|$)", text):
         return 1
@@ -262,7 +268,7 @@ def font(para, size):
 def next_block(body, index):
     for n in range(index + 1, len(body)):
         b = body[n]
-        if b["kind"] != "para" or b.get("text", "").strip():
+        if b["kind"] != "para" or norm(b.get("text", "")) or has_image(b):
             return n, b
     return None, None
 
@@ -330,9 +336,9 @@ def table_caption(body, index):
         b = body[i]
         if b["kind"] != "para":
             break
-        if not b.get("text", "").strip():
+        if not norm(b.get("text", "")):
             continue
-        match = CAPTION.match(b["text"])
+        match = CAPTION.match(norm(b["text"]))
         return i if match and match.group(1).casefold() == "таблица" else None
     return None
 
@@ -355,7 +361,7 @@ def normalize_model(model, mode, changes):
             # Title typography and the signature table are taken from the user's document.
             continue
         if block["kind"] == "para":
-            if not norm(block.get("text", "")):
+            if not norm(block.get("text", "")) and not has_image(block):
                 continue  # Preserve the user's deliberate title/page spacing.
             level = structure['levels'].get(i)
             props = block.setdefault("props", {})
@@ -380,8 +386,8 @@ def normalize_model(model, mode, changes):
                               'indentFirst': 0.0 if centered else PROFILE['body_indent_mm'] * MM})
                 if level == 1 and i > start and norm(block["text"]) != "содержание":
                     props["pageBreakBefore"] = True
-            elif CAPTION.match(block.get("text", "")):
-                match = CAPTION.match(block["text"])
+            elif CAPTION.match(norm(block.get("text", ""))):
+                match = CAPTION.match(norm(block["text"]))
                 props.update({"indentFirst": 0.0, "keepLines": True,
                               "align": "center" if match.group(1).casefold() == "рисунок" else "left"})
                 if match.group(1).casefold() == "таблица":
@@ -598,18 +604,16 @@ def apply_frames(model, metadata, changes, issues):
         title.update({"headers": {"default": blank_header, "first": blank_header, "even": blank_header},
                       "footers": {"default": blank_footer, "first": blank_footer, "even": blank_footer}, "titlePage": False,
                       "header": 0.0, "footer": 0.0, "pageW": 210 * MM, "pageH": 297 * MM,
-                      "marginTop": 18.15, "marginBottom": 85.05, "marginLeft": 77.95, "marginRight": 28.35})
-        body[start - 1]["section"] = title
-    toc_heading = next((i for i,b in enumerate(body) if b['kind']=='para' and norm(b.get('text',''))=='содержание'),None)
-    if toc_heading is None:
-        toc_heading = detect_toc(body)
-    if toc_heading is not None and toc_heading > start:
-        if body[toc_heading-1]['kind'] != 'para':
-            body.insert(toc_heading, {'kind':'para','text':'','runs':[], 'mark':{'size':1.0}})
-            toc_heading += 1
-        body[toc_heading-1]['section'] = copy.deepcopy(model['lastSection'])
-    sections = [(i, b["section"]) for i, b in enumerate(body) if b.get("section")]
-    sections.append((len(body), model["lastSection"]))
+                      "marginTop": 18.15, "marginBottom": PROFILE['cover_bottom_mm']*MM, "marginLeft": 77.95, "marginRight": 28.35})
+        if start<len(body):
+            body[start - 1]["section"] = title
+        else:
+            for block in body:
+                block.pop('section',None)
+            model['lastSection']=title
+    sections = [(i, b["section"]) for i, b in enumerate(body) if b.get("section")] if start<len(body) else []
+    if start<len(body):
+        sections.append((len(body), model["lastSection"]))
     section_start = 0
     for end, section in sections:
         if start and end < start:
@@ -617,7 +621,7 @@ def apply_frames(model, metadata, changes, issues):
             continue
         w, h = (297 * MM, 210 * MM) if section.get("landscape") else (210 * MM, 297 * MM)
         small = header(w, h, False)
-        big = header(w, h, True) if section_start == toc_heading else small
+        big = header(w, h, True) if section_start == start else small
         section.update({"headers": {"default": small, "first": big, "even": small},
                         "footers": {"default": blank_footer, "first": blank_footer, "even": blank_footer},
                         "titlePage": True, "marginLeft": 27.5 * MM, "marginRight": 10 * MM,
@@ -712,8 +716,11 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
 
 
 def body_start(model):
-    from structure import analyze
+    from structure import analyze,cover_end
     body = model["body"]
+    boundary=cover_end(model)
+    if boundary is not None:
+        return boundary
     heading = next(iter(analyze(model)['levels']), None)
     toc = detect_toc(body)
     if toc is not None:
@@ -745,6 +752,22 @@ def fill_cover(model, metadata, changes):
             p["mark"] = {"font": FONT, "size": 1.0}
         changes.append("Добавлен титульный лист из курсача; необязательные реквизиты без значений оставлены пустыми.")
     def replace(p, text):
+        from text_edits import replace as edit
+        raw=p.get('text','')
+        if p.get('objects'):
+            if not p.get('runs'):
+                p['runs']=[{'len':byte_len(raw),'props':{}}]
+            start=0
+            end=len(raw)
+            while start<end and raw[start]=='\ufffc':
+                start+=1
+            while end>start and raw[end-1]=='\ufffc':
+                end-=1
+            if '\ufffc' in raw[start:end]:
+                return
+            edit(p,start,end,text.replace('\ufffc',''))
+            font(p,PROFILE['text_size'])
+            return
         props = copy.deepcopy((p.get("runs") or [{"props": {}}])[0].get("props", {}))
         p["text"] = text
         p["runs"] = [{"len": byte_len(text), "props": props}]
@@ -770,7 +793,7 @@ def fill_cover(model, metadata, changes):
         replace(body[16], ", ".join(metadata[k] for k in ("city", "year") if metadata.get(k)))
     elif metadata:
         cover = body[:start]
-        discipline_index = next((i for i, b in enumerate(cover) if b["kind"] == "para" and b.get("text", "").startswith("по дисциплине")), None)
+        discipline_index = next((i for i, b in enumerate(cover) if b["kind"] == "para" and norm(b.get("text", "")).startswith("по дисциплине")), None)
         for cover_index, b in enumerate(cover):
             if b["kind"] == "para":
                 t = b.get("text", "").replace("\ufffc", "").strip()
@@ -1017,8 +1040,17 @@ def update_toc(wc, model, issues, do_fix=True):
 
 
 def structural_checks(wc, model, mode, issues):
+    if body_start(model)>=len(model['body']):
+        from cover_checks import inspect
+        inspect(model,issues)
+        return
     from rules_checks import check_rules
+    from illustration_checks import check as check_illustrations
+    check_illustrations(model,issues)
     check_rules(model, mode, issues)
+    if mode=='full':
+        from cover_checks import inspect
+        inspect(model,issues)
     body = model["body"]
     automatic_contents = auto_toc_text(body)
     toc = detect_toc(body)
@@ -1026,8 +1058,9 @@ def structural_checks(wc, model, mode, issues):
     reference_text = "\n".join(p.get('text','') for path,p in paragraphs(body)
                                if path[0] not in toc_tables and not CAPTION.match(norm(p.get('text','')))
                                and tuple(path) not in automatic_contents)
-    required = ("введение", "заключение", "список использованных источников") if mode == "full" else ()
-    for title in required:
+    from document_policy import required
+    required_titles = required(model) if mode == "full" else ()
+    for title in required_titles:
         accepted = {title, "библиографический список", "список литературы"} if title == "список использованных источников" else {title}
         if not any(p["kind"] == "para" and norm(p.get("text", "")) in accepted for p in body):
             add_issue(issues, "structure", f"Не найден раздел «{title.capitalize()}».")
@@ -1042,7 +1075,7 @@ def structural_checks(wc, model, mode, issues):
                 add_issue(issues, "bibliography-table", "Список источников не оформлен таблицей без границ.")
     if mode == "full":
         layout = wc.execute("document.layout")
-        if body_start(model) and wc.locate([body_start(model)])["page"] > 2:
+        if body_start(model) and wc.locate(block_path(body,body_start(model)))["page"] > 2:
             add_issue(issues, "title-pages", "Титульный лист занимает больше одной страницы: сократите длинные реквизиты или интервалы.")
         text=' '.join(b.get('text','') for b in body)
         if re.search(r'(?:ДП|ДР|МД)\.\d{6}\.',text) and len(layout['pages'])>100:
@@ -1056,19 +1089,18 @@ def structural_checks(wc, model, mode, issues):
         for index, page in enumerate(layout["pages"]):
             if index and page.get("header") is None and page.get("footer") is None:
                 add_issue(issues, "frame-missing", "Нет колонтитула с рамкой/штампом. Нужен оформленный шаблон; скрипт не рисует рамку поверх текста.", index + 1)
-        if len(layout["pages"]) > 1 and toc is not None:
-            toc_page = wc.locate([toc])["page"]
-            default_page = next((p for i, p in enumerate(layout["pages"], 1) if i > toc_page), None)
-            tp = layout["pages"][toc_page - 1]
+        if len(layout["pages"]) > 2:
+            default_page = layout['pages'][2]
+            tp = layout['pages'][1]
             if default_page and (tp.get("header"), tp.get("footer")) == (default_page.get("header"), default_page.get("footer")):
-                add_issue(issues, "large-stamp", "На содержании и обычном листе одинаковые колонтитулы: проверьте большой штамп содержания.")
+                add_issue(issues, "large-stamp", "На второй и третьей страницах одинаковые колонтитулы: проверьте большой штамп на второй странице.")
     for i, p in enumerate(body):
         if (i,) in automatic_contents:
             continue
         if p["kind"] != "para":
             continue
         text = p.get("text", "")
-        match = CAPTION.match(text)
+        match = CAPTION.match(norm(text))
         if match:
             number = match.group(2)
             if not reference_exists(reference_text, match.group(1), number):
@@ -1229,6 +1261,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
     check_cancel(cancel_event)
     metadata = prepare_metadata(metadata)
     source = Path(source).expanduser().resolve()
+    if source.is_file() and source.suffix.casefold()=='.doc':
+        raise ValueError('Старый формат .doc не поддерживается. Сначала сохраните отдельную копию в формате .docx.')
     if not source.is_file() or source.suffix.casefold() != ".docx":
         raise ValueError("Выберите существующий файл .docx.")
     before_hash = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -1266,6 +1300,12 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             if not check_only:
                 if mode == "full":
                     fill_cover(model, metadata, changes)
+                    from cover_checks import verify_requested,fill_known_fields
+                    fill_known_fields(model,metadata,changes)
+                    verify_requested(model,metadata,issues)
+                    if format_text:
+                        from cover_checks import format_cover
+                        format_cover(model,changes)
                 add_templates(model, toc_template, bibliography_template, changes, toc_entries, bibliography_entries)
                 add_optional_sections(model, optional_sections, changes)
             from captions import fill_captions
@@ -1275,6 +1315,10 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 preserving(model, prepare, changes, issues, check_only=check_only)
             if format_text or check_only:
                 preserving(model, clean, changes, issues, check_only=check_only)
+                from artifact_cleanup import process as process_artifacts
+                preserving(model,process_artifacts,changes,issues,check_only=check_only)
+                from list_checks import process as process_lists
+                process_lists(model,changes,issues,check_only=check_only)
             fill_captions(model, changes, issues, check_only=check_only)
             expected_text = stable_text(model, detect_toc(model["body"]))
             expected_tables = original["tables"] + sum(b["kind"] == "table" for b in model["body"]) - initial_tables
@@ -1286,6 +1330,13 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             if not check_only:
                 (temp / "formatted.json").write_text(json.dumps(model, ensure_ascii=False), encoding="utf-8")
                 wc.open(temp / "formatted.json")
+            if mode=='full':
+                from cover_checks import position
+                position(wc,model,temp,changes,issues,do_fix=not check_only and format_text)
+                start=body_start(model)
+                start_path=block_path(model['body'],start) if start<len(model['body']) else None
+                if not check_only and start_path is not None and wc.locate(start_path)['page']!=2:
+                    raise RuntimeError('Титульный лист не помещается на одной странице. Сократите реквизиты или интервалы; большой штамп должен находиться на второй странице.')
             expected_sections = 1 + sum(bool(b.get("section")) for b in model["body"])
             progress("Проверяю переносы таблиц и рисунков…")
             repair_layout(wc, model, mode, changes, issues, do_fix=not check_only)
@@ -1310,6 +1361,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             if result_inventory["media"] != original["media"]:
                 add_issue(issues, "media", "Набор файлов изображений изменился при сохранении: проверьте рисунки и объекты. Возможна перекодировка формата.")
             structural_checks(wc, final, mode, issues)
+            if mode=='full':
+                position(wc,final,temp,[],issues,do_fix=False)
             # Recheck final table/caption geometry without mutating it.
             repair_layout(wc, final, mode, [], issues, do_fix=False)
             update_toc(wc, final, issues, do_fix=False)
@@ -1327,6 +1380,10 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                              if s['text'].strip() in {'Изм.','Разраб.','Литера','Пров.'} and s['bbox'][1]>page.rect.height-45*MM]
                     if anchors and any(STAMP_FONT.replace(' ','').upper() not in s['font'].replace(' ','').upper() for s in anchors):
                         add_issue(issues,'stamp-font',f'{STAMP_FONT} не отрисован: установите шрифт и повторите обработку. В PDF обнаружена подстановка.',i+1)
+                    if mode=='full':
+                        big=any(s['text'].strip()=='Литера' for s in anchors)
+                        if big!=(i==1):
+                            add_issue(issues,'stamp-page','Большой штамп должен быть только на второй физической странице.',i+1)
         except ImportError:
             add_issue(issues, "pdf-inspection", "PyMuPDF не установлен: дополнительная проверка PDF пропущена.")
         if hashlib.sha256(source.read_bytes()).hexdigest() != before_hash:
@@ -1347,6 +1404,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
               "automated_only": True, "word_render_verified": False,
               "output": str(output), "check_only": check_only}
     report['format_profile'] = PROFILE
+    from document_policy import kind
+    report['document_kind']=kind(final)
     if created_from_template:
         report.update(input='Новый документ из шаблона курсача',created_from_template=True)
     try:

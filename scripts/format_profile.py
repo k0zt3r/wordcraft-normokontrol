@@ -7,7 +7,8 @@ DEFAULT_PATH = ROOT / 'assets' / 'format-profile.json'
 LOCAL_PATH = ROOT / '.normokontrol-profile.json'
 BOUNDS = {'text_size': (10,24), 'line_spacing': (1,3), 'body_indent_mm': (0,30),
           'compact_indent_mm': (0,30), 'chapter_gap_pt': (0,72), 'subheading_gap_pt': (0,72),
-          'stamp_size': (4,24), 'stamp_code_size': (4,24), 'frame_stroke_pt': (.1,3)}
+          'stamp_size': (4,24), 'stamp_code_size': (4,24), 'frame_stroke_pt': (.1,3),
+          'cover_department_gap_pt':(0,72), 'cover_bottom_mm':(10,40)}
 
 
 def validate(values):

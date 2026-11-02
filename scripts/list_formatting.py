@@ -40,6 +40,8 @@ def normalize(model, para, heading, cache):
         target['text'] = '-'
     elif heading and level['format'] == 'decimal':
         target['text'] = target.get('text', '').rstrip('.')
+    elif level['format'] == 'decimal':
+        target['text'] = '%' + str(level_index + 1) + ')'
     props = para.setdefault('props', {})
     props.update(numbering={'num': cloned_num['id'], 'level': level_index},
                  indentLeft=0.0, indentRight=0.0, indentFirst=indent, tabs=[])
