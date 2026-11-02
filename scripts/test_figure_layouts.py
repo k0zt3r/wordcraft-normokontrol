@@ -91,7 +91,8 @@ class FigureLayoutTests(unittest.TestCase):
         model={'body':[paragraph('Введение'),paragraph('- КОНТРОЛЬ доступа;'),
                        paragraph('- Контроль доступа.')],'styles':{}}
         issues=[];process(model,[],issues,check_only=True)
-        self.assertEqual(sum(i['code']=='list-case-review' for i in issues),2)
+        # All-caps tokens are preserved without guessing whether they are names.
+        self.assertEqual(sum(i['code']=='list-case-review' for i in issues),1)
 
     def test_wordcraft_roundtrip_preserves_picture_grid_and_caption_sequence(self):
         from docx import Document

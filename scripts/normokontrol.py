@@ -1362,7 +1362,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 from artifact_cleanup import process as process_artifacts
                 preserving(model,process_artifacts,changes,issues,check_only=check_only)
                 from list_checks import process as process_lists
-                process_lists(model,changes,issues,check_only=check_only)
+                preserving(model,process_lists,changes,issues,check_only=check_only)
             fill_captions(model, changes, issues, check_only=check_only)
             expected_text = stable_text(model, detect_toc(model["body"]))
             expected_tables = original["tables"] + sum(b["kind"] == "table" for b in model["body"]) - initial_tables

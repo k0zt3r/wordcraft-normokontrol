@@ -17,12 +17,14 @@ class CoverListTests(unittest.TestCase):
         model={'body':[p('Введение'),p('Приоритетные меры защиты:'),
                        p('- Шифрование данных. Для защиты клиентов.'),p('- Контроль доступа. Для ограничения доступа.'),
                        p('- Обучение сотрудников. Для защиты информации.'),p('- Резервное копирование данных.')],'styles':{}}
-        process(model,[],[])
-        self.assertEqual(model['body'][2]['text'],'- шифрование данных. Для защиты клиентов;')
-        self.assertEqual(model['body'][-1]['text'],'- резервное копирование данных.')
         original=copy.deepcopy(model)
-        process(model,[],[])
+        issues=[]
+        process(model,[],issues)
         self.assertEqual(model,original)
+        self.assertIn('list-case-review',{i['code'] for i in issues})
+        self.assertIn('list-punctuation-review',{i['code'] for i in issues})
+        repeated=[];process(model,[],repeated)
+        self.assertEqual(issues,repeated)
 
     def test_cover_boundary_stops_before_images(self):
         from structure import cover_end
@@ -47,11 +49,11 @@ class CoverListTests(unittest.TestCase):
 
     def test_plain_list_punctuation_and_markers(self):
         model={'body':[p('Введение'),p('1. первый пункт.'),p('2. второй пункт;')],'styles':{}}
-        process(model,[],[])
-        self.assertEqual([x['text'] for x in model['body'][1:]],['1) первый пункт;','2) второй пункт.'])
         before=copy.deepcopy(model)
-        process(model,[],[])
+        issues=[];process(model,[],issues)
         self.assertEqual(model,before)
+        self.assertIn('list-marker',{i['code'] for i in issues})
+        self.assertIn('list-punctuation',{i['code'] for i in issues})
 
     def test_check_only_keeps_case_and_text(self):
         model={'body':[p('Введение'),p('- Москва'),p('- ФСТЭК')],'styles':{}}
@@ -67,9 +69,11 @@ class CoverListTests(unittest.TestCase):
             p('первый подпункт',numbering={'num':1,'level':1}),
             p('второй подпункт',numbering={'num':1,'level':1}),p('- продолжение')],
             'styles':{},'numbering':numbering}
-        process(model,[],[])
-        self.assertTrue(model['body'][3]['text'].endswith(';'))
-        self.assertTrue(model['body'][4]['text'].endswith('.'))
+        before=copy.deepcopy(model)
+        issues=[];process(model,[],issues)
+        self.assertEqual(model,before)
+        self.assertIn('list-punctuation',{i['code'] for i in issues})
+        self.assertNotIn('list-structure-review',{i['code'] for i in issues})
 
     def test_bookmarks_and_runs_survive_punctuation_edit(self):
         para=p('текст\ufffc')

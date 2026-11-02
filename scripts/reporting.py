@@ -85,7 +85,7 @@ def render_sources(messages):
 
 ERRORS = {'structure','stamp-code','frame-missing','table-layout','figure-layout','toc-convergence'}
 REVIEW = {'bibliography-review','caption-review','caption-placeholder','heading-ambiguous','toc-auto-review','media',
-          'list-case-review','list-italic-review','list-punctuation-review','cover-discipline-review',
+          'list-case-review','list-italic-review','list-punctuation-review','list-structure-review','cover-discipline-review',
           'heading-reference-review','bibliography-format-review','legacy-overlay-review','cover-approval','toc-manual-review'}
 
 
