@@ -45,5 +45,5 @@ def normalize(model, para, heading, cache):
     props.update(numbering={'num': cloned_num['id'], 'level': level_index},
                  indentLeft=0.0, indentRight=0.0, indentFirst=indent, tabs=[])
     if not heading:
-        props['align'] = 'left'
+        props['align'] = 'justify'
     return True

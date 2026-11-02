@@ -44,7 +44,39 @@ class NormokontrolTests(unittest.TestCase):
         self.assertEqual(level['suffix'], 'space')
         self.assertEqual(para['props']['indentFirst'], 10 * nk.MM)
         self.assertEqual(para['props']['indentLeft'], 0)
+        self.assertEqual(para['props']['align'], 'justify')
         self.assertEqual(model['numbering']['abstracts'][0]['levels'][0]['text'], '•')
+
+    def test_simple_list_punctuation_and_alignment_roundtrip(self):
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        with tempfile.TemporaryDirectory(prefix='simple-lists-') as directory:
+            folder = Path(directory)
+            doc = Document()
+            doc.add_paragraph('Курсовая работа')
+            doc.add_paragraph('Иркутск 2026')
+            doc.add_heading('Введение', 1)
+            doc.add_paragraph('Предусмотрены следующие меры:')
+            for text in ('первая мера', 'вторая мера'):
+                p = doc.add_paragraph(text)
+                props = p._p.get_or_add_pPr()
+                number = OxmlElement('w:numPr')
+                level = OxmlElement('w:ilvl'); level.set(qn('w:val'), '0')
+                instance = OxmlElement('w:numId'); instance.set(qn('w:val'), '1')
+                number.extend([level, instance]); props.append(number)
+            source = folder / 'source.docx'
+            doc.save(source)
+            original = hashlib.sha256(source.read_bytes()).hexdigest()
+            for check in (True, False):
+                report = nk.process(source, folder / str(check), check_only=check, progress=lambda _: None)
+                out = Document(Path(report['output']) / report['docx_name'])
+                items = [p for p in out.paragraphs if p.text.startswith(('первая мера', 'вторая мера'))]
+                self.assertEqual([p.text for p in items], ['первая мера', 'вторая мера'] if check else ['первая мера;', 'вторая мера.'])
+                if not check:
+                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+                    self.assertTrue(all(p.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY for p in items))
+                    self.assertFalse(any(i['code'] == 'list-punctuation' for i in report['issues']))
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), original)
 
     def test_whitespace_cleanup_preserves_runs_and_breaks(self):
         import copy

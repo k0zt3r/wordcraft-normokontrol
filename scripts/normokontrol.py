@@ -433,7 +433,7 @@ def normalize_model(model, mode, changes, heading_gap=None):
             normalize_list(model, block, level, list_cache)
             literal_item = NUMBERED_HEADING.match(norm(block.get('text', '')))
             if not level and literal_item and literal_item[2] and '.' not in literal_item[1]:
-                props.update(align='left', indentFirst=PROFILE['body_indent_mm'] * MM, keepNext=False,
+                props.update(align='justify', indentFirst=PROFILE['body_indent_mm'] * MM, keepNext=False,
                              pageBreakBefore=False, outlineLevel=9)
         elif block["kind"] == "table":
             from captions import is_figure_layout
@@ -1361,7 +1361,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 preserving(model, clean, changes, issues, check_only=check_only)
                 from artifact_cleanup import process as process_artifacts
                 preserving(model,process_artifacts,changes,issues,check_only=check_only)
-                from list_checks import process as process_lists
+                from list_checks import process as process_lists, format_simple
+                format_simple(model,changes,issues,check_only=check_only)
                 preserving(model,process_lists,changes,issues,check_only=check_only)
             fill_captions(model, changes, issues, check_only=check_only)
             expected_text = stable_text(model, detect_toc(model["body"]))

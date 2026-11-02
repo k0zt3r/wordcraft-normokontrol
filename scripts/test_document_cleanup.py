@@ -17,6 +17,9 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(nk.heading_level(paragraph('1 Теория'), {}), 1)
         self.assertEqual(nk.heading_level(paragraph('Глава 1. Теория'), {}), 1)
         self.assertEqual(nk.heading_level(paragraph('1. Глава', outlineLevel=0), {}), 1)
+        model = {'body': [paragraph('Введение'), paragraph('1. Видеонаблюдение'), paragraph('2. Датчики')], 'styles': {}}
+        nk.normalize_model(model, 'full', [])
+        self.assertTrue(all(p['props']['align'] == 'justify' for p in model['body'][1:]))
 
     def test_cleanup_readonly_and_duplicate_break(self):
         body = [paragraph('Введение'), paragraph('3.\tКонтроль'), paragraph('\f'), paragraph('Заключение')]
