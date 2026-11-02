@@ -375,7 +375,7 @@ def normalize_model(model, mode, changes):
                 trim_manual_indent(block)
             if level:
                 props.update({"keepNext": True, "keepLines": True, "suppressHyphens": True})
-                # User profile: spacing only after chapters; subheadings flow into text.
+                # Appendix Е applies heading/text separation to every heading level.
                 props.update(spaceAfter=PROFILE['chapter_gap_pt'] if level == 1 else PROFILE['subheading_gap_pt'],
                              outlineLevel=level - 1)
                 if level > 1:
@@ -417,16 +417,15 @@ def normalize_model(model, mode, changes):
                 rp["cantSplit"] = True
                 if data_table:
                     rp.update({"height": max(rp.get("height") or 0, 8 * MM), "heightRule": "atLeast"})
-                    if mode == "compact":
-                        rp["header"] = ri == 0
+                    rp["header"] = ri == 0
                 for cell in row["cells"]:
                     for _, para in paragraphs(cell["blocks"]):
                         font(para, size)
                         pp = para.setdefault("props", {})
-                        pp["lineSpacing"] = {"rule": "multiple", "value": 1.0 if data_table else PROFILE['line_spacing']}
+                        pp["lineSpacing"] = {"rule": "multiple", "value": PROFILE['line_spacing']}
                         pp["spaceAfter"] = 0.0
                         if data_table:
-                            pp["keepNext"] = mode == "full" and ri < len(block["rows"]) - 1
+                            pp["keepNext"] = False  # §7.6.7 permits splitting a table between rows.
             if i in structure['toc'] or (refs is not None and i > refs and not any(
                     b["kind"] == "para" and re.fullmatch(r"приложение\s+[а-яa-z]", norm(b.get("text", "")))
                     for b in body[refs + 1:i])):
@@ -453,8 +452,8 @@ def normalize_model(model, mode, changes):
                             "pageW": (297 if section.get("landscape") else 210) * MM,
                             "pageH": (210 if section.get("landscape") else 297) * MM,
                             "footers": {"default": part_id, "first": part_id, "even": part_id}})
-    changes.append("Шрифт и интервалы основного текста, заголовки, строки таблиц приведены к выбранному профилю. "
-                   "Титульник, колонтитулы, рамки и штампы сохранены из исходника.")
+    changes.append("Шрифт и интервалы текста, заголовки и строки таблиц приведены к правилам положения. "
+                   "Изменения титульника, рамок и штампов перечислены отдельно.")
     if mode == "compact":
         changes[-1] = ("Шрифт, интервалы, поля A4 и таблицы приведены к обычному учебному профилю; "
                        "внизу страниц добавлено поле PAGE по центру.")
@@ -946,7 +945,7 @@ def repair_layout(wc, model, mode, changes, issues, do_fix=True):
             pages = {p["page"] for p in positions}
             split = len(pages) > 1
             detached = caption_pos["page"] != min(pages)
-            if detached or (mode == "full" and split):
+            if detached:
                 if do_fix and caption not in forced:
                     wc.break_before(caption)
                     forced.add(caption)
@@ -1260,6 +1259,9 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
     from runtime import check_cancel
     check_cancel(cancel_event)
     metadata = prepare_metadata(metadata)
+    from normative import code as normative_code
+    if metadata.get('code'):
+        metadata['code']=normative_code(metadata['code'])
     source = Path(source).expanduser().resolve()
     if source.is_file() and source.suffix.casefold()=='.doc':
         raise ValueError('Старый формат .doc не поддерживается. Сначала сохраните отдельную копию в формате .docx.')
@@ -1297,6 +1299,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             from integrity import check_import, preserving
             check_import(source, model)
             initial_tables = sum(b["kind"] == "table" for b in model["body"])
+            original_pages=len(wc.execute('document.layout')['pages'])
             if not check_only:
                 if mode == "full":
                     fill_cover(model, metadata, changes)
@@ -1306,6 +1309,13 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                     if format_text:
                         from cover_checks import format_cover
                         format_cover(model,changes)
+                from normative import prepare as normative_prepare
+                normative_prepare(model,changes,issues)
+                if mode=='full' and original_pages>10 and detect_toc(model['body']) is None and not auto_toc_text(model['body']):
+                    from structure import analyze
+                    structure=analyze(model)
+                    toc_entries=[p['text'].replace('\ufffc','').strip() for i,p in enumerate(model['body']) if i in structure['levels'] and norm(p.get('text',''))!='содержание']
+                    toc_template=True
                 add_templates(model, toc_template, bibliography_template, changes, toc_entries, bibliography_entries)
                 add_optional_sections(model, optional_sections, changes)
             from captions import fill_captions

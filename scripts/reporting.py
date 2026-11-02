@@ -2,9 +2,10 @@
 from collections import defaultdict
 import html
 
-ERRORS = {'structure','stamp-code','frame-missing','table-layout','figure-layout','toc-convergence'}
+ERRORS = {'structure','stamp-code','frame-missing','table-layout','figure-layout','toc-convergence','cover-approval'}
 REVIEW = {'bibliography-review','caption-review','caption-placeholder','heading-ambiguous','toc-auto-review','media',
-          'list-case-review','list-italic-review','list-punctuation-review','cover-discipline-review'}
+          'list-case-review','list-italic-review','list-punctuation-review','cover-discipline-review',
+          'heading-reference-review','bibliography-format-review','legacy-overlay-review'}
 
 
 def severity(code):

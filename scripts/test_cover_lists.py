@@ -35,7 +35,7 @@ class CoverListTests(unittest.TestCase):
         from structure import analyze
         model={'body':[p('Отчёт по лабораторной работе'),p('Иркутск 2026'),
                        p('Теоретическая часть',align='center'),p('Практическая часть',align='center')], 'styles':{}}
-        self.assertEqual(required(model),())
+        self.assertIn('список использованных источников',required(model))
         self.assertEqual(analyze(model)['levels'][2],1)
 
     def test_invisible_artifacts_preserve_overlays(self):

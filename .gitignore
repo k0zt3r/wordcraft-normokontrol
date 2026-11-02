@@ -34,3 +34,6 @@ normokontrol-backup-*/
 .normokontrol-result-*/
 /2 курс 1 сем/
 /2 курс 2 сем/
+!/references/norm-source/images/*.png
+!/references/norm-source/images/*.jpg
+!/references/norm-source/images/*.jpeg

@@ -10,6 +10,20 @@ def check_rules(model, mode, issues):
                              visible_text_runs, heading_level, CAPTION, auto_toc_text,
                              detect_tocs, norm, MM, add_issue, NUMBERED_HEADING)
     body = model['body']
+    bibliography=False
+    for block in body:
+        label=norm(block.get('text',''))
+        if label in {'список использованных источников','библиографический список','список литературы'}:
+            bibliography=True
+            continue
+        if label.startswith('приложение '):
+            bibliography=False
+        if bibliography and block['kind']=='table':
+            for row in block.get('rows',[]):
+                if len(row['cells'])<2:continue
+                description=' '.join(p.get('text','') for _,p in paragraphs(row['cells'][-1]['blocks']))
+                if norm(description).startswith(('http://','https://')):
+                    add_issue(issues,'bibliography-format-review','Описание источника начинается с URL. Проверьте состав и порядок библиографических сведений по §6.10 и разделу 9; недостающие данные не выдумываются.')
     start = body_start(model)
     automatic = auto_toc_text(body)
     toc = set(detect_tocs(body))
@@ -30,7 +44,7 @@ def check_rules(model, mode, issues):
                 add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')
             if level > 1:
                 if abs((props.get('spaceAfter') or 0) - PROFILE['subheading_gap_pt']) > .1:
-                    add_issue(issues, 'subheading-spacing', f'По выбранному образцу после подзаголовка текст должен идти со следующей строки без дополнительного интервала: {text}')
+                    add_issue(issues, 'subheading-spacing', f'Проверьте расстояние между заголовком и текстом по общему правилу приложения Е (два интервала): {text}')
                 if props.get('pageBreakBefore'):
                     add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}')
             match = NUMBERED_HEADING.match(text)

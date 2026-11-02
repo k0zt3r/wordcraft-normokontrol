@@ -51,6 +51,8 @@ def inspect(model, issues):
     cover=list(paragraphs(model['body'][:start]))
     titles={norm(t) for t in WORK_TYPES.values()}
     kinds=[p for _,p in cover if norm(p.get('text','')) in titles]
+    if any(norm(p.get('text',''))=='курсовая работа' for p in kinds) and not any('к защите допускаю' in norm(p.get('text','')) for _,p in cover):
+        add_issue(issues,'cover-approval','Отсутствует гриф допуска (§6.2д, обязательный реквизит для указанного в пункте случая курсовой). Укажите уполномоченное лицо; данные автоматически не выдумываются.')
     if not kinds:
         add_issue(issues,'cover-work-type','На титульном листе не распознан вид работы; проверьте реквизит по §6.2.')
     for p in kinds:
@@ -86,7 +88,7 @@ def format_cover(model, changes):
         font(p,PROFILE['text_size'])
         props=p.setdefault('props',{})
         props.update(spaceBefore=0.0,spaceAfter=0.0,spaceBeforeAuto=False,spaceAfterAuto=False,
-                     lineSpacing={'rule':'multiple','value':1.0})
+                     lineSpacing={'rule':'multiple','value':PROFILE['line_spacing']})
         if len(path)==1:
             props.update(indentFirst=0.0,indentLeft=0.0,indentRight=0.0)
             if 'к защите допускаю' not in text:
@@ -106,7 +108,7 @@ def format_cover(model, changes):
         if re.match(r'^(?:кр|кп|др|дп|лр|уп|пп|оп|ргр)\.\d',text):
             props.update(spaceBefore=12.0,spaceAfter=24.0)
         if len(path)>1:
-            props['lineSpacing']={'rule':'multiple','value':1.15}
+            props['lineSpacing']={'rule':'multiple','value':PROFILE['line_spacing']}
         for r in p.get('runs',[]):
             r.setdefault('props',{}).update(italic=False,italicCs=False)
         p.setdefault('mark',{}).update(italic=False,italicCs=False)

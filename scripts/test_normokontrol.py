@@ -25,13 +25,13 @@ class NormokontrolTests(unittest.TestCase):
             doc.save(source)
             report = nk.process(source, folder / 'result', progress=lambda _: None)
             result = Document(folder / 'result' / report['docx_name'])
-            subs = [p for p in result.paragraphs if p.text in {'1.1. Подраздел', '1.1.1. Пункт', '1.2 Подраздел'}]
+            subs = [p for p in result.paragraphs if p.text in {'1.1 Подраздел', '1.1.1 Пункт', '1.2 Подраздел'}]
             self.assertEqual(len(subs), 3)
             for p in subs:
                 self.assertFalse(p.paragraph_format.page_break_before)
-                self.assertEqual(p.paragraph_format.space_after.pt, 0)
+                self.assertEqual(p.paragraph_format.space_after.pt, 28)
             self.assertFalse(any(i['code'] in {'subheading-spacing', 'subheading-page-break'} for i in report['issues']))
-            self.assertTrue(any(i['code'] == 'heading-number-dot' for i in report['issues']))
+            self.assertFalse(any(i['code'] == 'heading-number-dot' for i in report['issues']))
 
     def test_native_list_marker_and_heading_indent(self):
         from list_formatting import normalize

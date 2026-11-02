@@ -42,7 +42,8 @@ def safe_path(root, relative):
     rel=PurePosixPath(relative)
     if rel.is_absolute() or not rel.parts or any(p in {'.','..'} or ':' in p or '\\' in p for p in rel.parts):
         raise ValueError('Некорректный путь восстановления.')
-    if relative not in ROOT_FILES and not (rel.parts[0] in {'scripts','assets','references'} and rel.suffix in {'.py','.json','.md','.yaml'}):
+    norm_asset=relative.startswith('references/norm-source/') and rel.suffix in {'.png','.jpg','.jpeg','.svg'}
+    if relative not in ROOT_FILES and not norm_asset and not (rel.parts[0] in {'scripts','assets','references'} and rel.suffix in {'.py','.json','.md','.yaml'}):
         raise ValueError('Журнал содержит файл вне программы.')
     target=root/Path(*rel.parts)
     if not target.resolve().is_relative_to(root.resolve()):

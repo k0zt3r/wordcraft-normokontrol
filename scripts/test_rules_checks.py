@@ -23,7 +23,7 @@ class RuleTests(unittest.TestCase):
         model = {'body': [paragraph('Глава 1. Теория'), p], 'styles': styles, 'numbering': numbering}
         nk.normalize_model(model, 'full', [])
         self.assertFalse(p['props']['pageBreakBefore'])
-        self.assertEqual(p['props']['spaceAfter'], 0)
+        self.assertEqual(p['props']['spaceAfter'], 28)
         p['props']['numbering']['level'] = 2
         self.assertEqual(nk.heading_level(p, styles, numbering), 3)
         self.assertEqual(nk.heading_level(paragraph('Глава 2. Практика'), {}), 1)
@@ -44,7 +44,7 @@ class RuleTests(unittest.TestCase):
                             paragraph('1.3 Повтор'), paragraph('3.1 Без раздела')])
         self.assertTrue({'heading-sequence', 'heading-parent', 'heading-number'} <= codes)
         valid = self.codes([paragraph('1 Раздел', spaceAfter=28),
-                            paragraph('1.1 Подраздел', spaceAfter=0),
+                            paragraph('1.1 Подраздел', spaceAfter=28),
                             paragraph('2 Раздел', spaceAfter=28, outlineLevel=0)])
         self.assertFalse(valid)
 
@@ -84,13 +84,13 @@ class RuleTests(unittest.TestCase):
                 self.assertEqual(nk.heading_level(p, model['styles']), level)
                 nk.normalize_model(model, 'full', [])
                 self.assertEqual(p['props']['outlineLevel'], level - 1)
-                self.assertEqual(p['props']['spaceAfter'], 28 if level == 1 else 0)
+                self.assertEqual(p['props']['spaceAfter'], 28)
                 self.assertEqual(p['props']['pageBreakBefore'], level == 1)
                 self.assertTrue(p['props']['keepNext'])
 
     def test_subheading_checks_preserve_check_only_input(self):
         codes = self.codes([paragraph('1 Глава', spaceAfter=28),
-                            paragraph('1.1. Подраздел', pageBreakBefore=True, spaceAfter=28)])
+                            paragraph('1.1. Подраздел', pageBreakBefore=True, spaceAfter=0)])
         self.assertTrue({'subheading-spacing', 'subheading-page-break', 'heading-number-dot'} <= codes)
 
 

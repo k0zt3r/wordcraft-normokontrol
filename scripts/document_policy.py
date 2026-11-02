@@ -20,6 +20,6 @@ def kind(model):
 
 
 def required(model):
-    if kind(model)=='lab':
-        return ()
+    # §6.1 has no blanket laboratory exemption. A task-specific waiver needs
+    # independent evidence; inferred work type cannot silently waive the PDF.
     return ('введение','заключение','список использованных источников')

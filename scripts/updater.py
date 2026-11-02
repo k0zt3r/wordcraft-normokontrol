@@ -13,11 +13,12 @@ from zipfile import ZipFile
 REPO = 'k0zt3r/wordcraft-normokontrol'
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED = ('VERSION','run.cmd','normokontrol.py','_normokontrol_recovery.py','requirements.txt',
+            'Normokontrol.pdf','references/norm-source/requirements.json',
             'assets/course-templates.json','assets/format-profile.json',
             *('scripts/'+name+'.py' for name in ('normokontrol','normokontrol_gui','irgups_data','captions',
                'list_formatting','whitespace_cleanup','document_cleanup','rules_checks','structure',
                'integrity','format_profile','pdf_checks','atomic_files','runtime','reporting','preferences','cover_checks','list_checks','text_edits',
-               'artifact_cleanup','document_policy','illustration_checks','updater')))
+               'artifact_cleanup','document_policy','illustration_checks','normative','updater')))
 
 
 def fetch(url):
@@ -71,7 +72,8 @@ def install_archive(payload, expected_version, root):
             if len(parts) < 2 or any(p in {'.', '..'} or ':' in p or '\\' in p for p in parts):
                 raise ValueError('Небезопасный путь в архиве.')
             rel = Path(*parts[1:])
-            if str(rel) not in allowed and not (parts[1] in {'scripts', 'assets', 'references'} and rel.suffix in {'.py', '.json', '.md', '.yaml'}):
+            norm_asset=rel.as_posix().startswith('references/norm-source/') and rel.suffix in {'.png','.jpg','.jpeg','.svg'}
+            if str(rel) not in allowed and not norm_asset and not (parts[1] in {'scripts', 'assets', 'references'} and rel.suffix in {'.py', '.json', '.md', '.yaml'}):
                 continue
             if not (root / rel).resolve().is_relative_to(root.resolve()):
                 raise ValueError('Файл обновления находится вне папки программы.')

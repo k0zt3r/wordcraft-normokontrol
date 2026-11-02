@@ -40,8 +40,9 @@ def profile_dialog(root):
     for row,(key,label) in enumerate(labels.items()):
         ttk.Label(dialog,text=label).grid(row=row,column=0,sticky='w',padx=12,pady=4)
         values[key]=tk.StringVar(value=str(PROFILE[key]))
-        ttk.Entry(dialog,textvariable=values[key],width=10).grid(row=row,column=1,padx=12,pady=4)
-    ttk.Label(dialog,text='Изменения применятся после перезапуска.\nЭто локальные настройки; они могут отличаться от положения.',wraplength=440).grid(row=len(labels),column=0,columnspan=2,padx=12,pady=10)
+        locked=key in {'text_size','line_spacing','body_indent_mm','chapter_gap_pt','subheading_gap_pt','frame_stroke_pt'}
+        ttk.Entry(dialog,textvariable=values[key],width=10,state='disabled' if locked else 'normal').grid(row=row,column=1,padx=12,pady=4)
+    ttk.Label(dialog,text='Нормативные параметры защищены от изменения.\nДоступны технические размеры штампа и компоновки, не заданные PDF численно. Изменения — после перезапуска.',wraplength=440).grid(row=len(labels),column=0,columnspan=2,padx=12,pady=10)
     def apply():
         try:
             data={key:float(value.get().replace(',','.')) for key,value in values.items()}
