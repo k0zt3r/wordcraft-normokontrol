@@ -21,11 +21,12 @@ def cover_end(model):
 
 
 def analyze(model):
-    from normokontrol import norm, heading_level, effective_para, NUMBERED_HEADING, detect_tocs, paragraphs
+    from normokontrol import norm, heading_level, effective_para, NUMBERED_HEADING, detect_tocs, paragraphs, manual_toc_indices
     body = model['body']
     styles = model.get('styles', {})
     numbering = model.get('numbering', {})
     toc = set(detect_tocs(body))
+    toc.update(manual_toc_indices(body))
     toc_names = {norm(p.get('text', '')) for i in toc for _, p in paragraphs([body[i]])}
     levels, numbers, uncertain = {}, {}, []
     native_counts = {}

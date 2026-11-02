@@ -52,7 +52,7 @@ def inspect(model, issues):
     titles={norm(t) for t in WORK_TYPES.values()}
     kinds=[p for _,p in cover if norm(p.get('text','')) in titles]
     if any(norm(p.get('text',''))=='курсовая работа' for p in kinds) and not any('к защите допускаю' in norm(p.get('text','')) for _,p in cover):
-        add_issue(issues,'cover-approval','Отсутствует гриф допуска (§6.2д, обязательный реквизит для указанного в пункте случая курсовой). Укажите уполномоченное лицо; данные автоматически не выдумываются.')
+        add_issue(issues,'cover-approval','Сверьте необходимость грифа допуска с кафедральным образцом: §6.2д содержит оговорку о выпускающих кафедрах и курсовых работах. Отсутствие грифа само по себе не признано ошибкой любой курсовой; данные не выдумываются.')
     if not kinds:
         add_issue(issues,'cover-work-type','На титульном листе не распознан вид работы; проверьте реквизит по §6.2.')
     for p in kinds:

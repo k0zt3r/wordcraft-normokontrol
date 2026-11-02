@@ -53,7 +53,7 @@ def build():
         ('Приложение И','В текстовом слое PDF не заданы числовые кегли 16/9 и имя ISOCPEUR для шифра. Технические значения не выдаются за обязательные нормы.','not-specified')]
     data={'source_sha256':source['sha256'],'precedence':'PDF > этот реестр > технические параметры; прежние пользовательские предпочтения не отменяют PDF.',
           'rules':[{'source':a,'requirement':b,'status':c} for a,b,c in rules],
-          'implementation_choices':{'heading_gap_pt':28,'stamp_code_size':16,'stamp_size':9,
+          'implementation_choices':{'heading_gap':'Один добавочный шаг строк, измеренный через Wordcraft; суммарно два шага до текста. Число пунктов не задано PDF.','stamp_code_size':16,'stamp_size':9,
              'note':'Числа не утверждаются как буквально заданные PDF. Геометрия и вёрстка требуют проверки; при противоречии приоритет у PDF.'}}
     (ROOT/'requirements.json').write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
     (ROOT/'README.md').write_text('# Машиночитаемый источник нормоконтроля\n\n'+

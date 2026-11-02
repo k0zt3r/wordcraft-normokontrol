@@ -29,7 +29,7 @@ class NormokontrolTests(unittest.TestCase):
             self.assertEqual(len(subs), 3)
             for p in subs:
                 self.assertFalse(p.paragraph_format.page_break_before)
-                self.assertEqual(p.paragraph_format.space_after.pt, 28)
+                self.assertEqual(p.paragraph_format.space_after.pt, 24.15)
             self.assertFalse(any(i['code'] in {'subheading-spacing', 'subheading-page-break'} for i in report['issues']))
             self.assertFalse(any(i['code'] == 'heading-number-dot' for i in report['issues']))
 
@@ -244,7 +244,7 @@ class NormokontrolTests(unittest.TestCase):
             self.assertEqual(fixed_para.runs[0].font.size.pt, 14)
             self.assertFalse(fixed_para.runs[0].bold)
             introduction = next(p for p in final.paragraphs if p.text == 'Введение')
-            self.assertAlmostEqual(introduction.paragraph_format.space_after.pt, 28, places=1)
+            self.assertAlmostEqual(introduction.paragraph_format.space_after.pt, 24.15, places=1)
             self.assertFalse(any(item['code'] in {'heading-spacing', 'paragraph-indent', 'text-color'}
                                  for item in result['issues']))
             shell = next(p for p in final.paragraphs if p.text.startswith('for x in'))

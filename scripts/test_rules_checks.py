@@ -23,7 +23,7 @@ class RuleTests(unittest.TestCase):
         model = {'body': [paragraph('Глава 1. Теория'), p], 'styles': styles, 'numbering': numbering}
         nk.normalize_model(model, 'full', [])
         self.assertFalse(p['props']['pageBreakBefore'])
-        self.assertEqual(p['props']['spaceAfter'], 28)
+        self.assertEqual(p['props']['spaceAfter'], 24.15)
         p['props']['numbering']['level'] = 2
         self.assertEqual(nk.heading_level(p, styles, numbering), 3)
         self.assertEqual(nk.heading_level(paragraph('Глава 2. Практика'), {}), 1)
@@ -43,9 +43,9 @@ class RuleTests(unittest.TestCase):
                             paragraph('1.1 Подраздел'), paragraph('1.3 Пропуск'),
                             paragraph('1.3 Повтор'), paragraph('3.1 Без раздела')])
         self.assertTrue({'heading-sequence', 'heading-parent', 'heading-number'} <= codes)
-        valid = self.codes([paragraph('1 Раздел', spaceAfter=28),
-                            paragraph('1.1 Подраздел', spaceAfter=28),
-                            paragraph('2 Раздел', spaceAfter=28, outlineLevel=0)])
+        valid = self.codes([paragraph('1 Раздел', spaceAfter=24.15),
+                            paragraph('1.1 Подраздел', spaceAfter=24.15),
+                            paragraph('2 Раздел', spaceAfter=24.15, outlineLevel=0)])
         self.assertFalse(valid)
 
     def test_inherited_color_indent_and_heading_spacing(self):
@@ -57,20 +57,20 @@ class RuleTests(unittest.TestCase):
         self.assertTrue({'heading-spacing', 'text-color', 'paragraph-indent'} <= {i['code'] for i in issues})
 
     def test_appendix_refs_order_and_exclusions(self):
-        codes = self.codes([paragraph('Введение', spaceAfter=28),
+        codes = self.codes([paragraph('Введение', spaceAfter=24.15),
             paragraph('Сначала см. приложение Б.', indentFirst=10*nk.MM),
             paragraph('Затем см. приложение А.', indentFirst=10*nk.MM),
-            paragraph('Приложение А', spaceAfter=28), paragraph('Приложение Б', spaceAfter=28),
-            paragraph('Приложение Ё', spaceAfter=28), paragraph('Приложение Б', spaceAfter=28)])
+            paragraph('Приложение А', spaceAfter=24.15), paragraph('Приложение Б', spaceAfter=24.15),
+            paragraph('Приложение Ё', spaceAfter=24.15), paragraph('Приложение Б', spaceAfter=24.15)])
         self.assertTrue({'appendix-order', 'appendix-letter', 'appendix-reference', 'appendix-duplicate'} <= codes)
         self.assertNotIn('paragraph-indent', self.codes([
-            paragraph('Введение', spaceAfter=28), paragraph('sudo command'),
+            paragraph('Введение', spaceAfter=24.15), paragraph('sudo command'),
             paragraph('Таблица 1 — Название'), paragraph('x = y')]))
 
     def test_normalize_keeps_required_heading_gap(self):
         model = {'body': [paragraph('Введение')], 'styles': {}}
         nk.normalize_model(model, 'full', [])
-        self.assertEqual(model['body'][0]['props']['spaceAfter'], 28)
+        self.assertEqual(model['body'][0]['props']['spaceAfter'], 24.15)
         self.assertNotIn('heading-spacing', self.codes(model['body']))
 
     def test_dotted_subheadings_override_wrong_style_and_page_break(self):
@@ -84,12 +84,12 @@ class RuleTests(unittest.TestCase):
                 self.assertEqual(nk.heading_level(p, model['styles']), level)
                 nk.normalize_model(model, 'full', [])
                 self.assertEqual(p['props']['outlineLevel'], level - 1)
-                self.assertEqual(p['props']['spaceAfter'], 28)
+                self.assertEqual(p['props']['spaceAfter'], 24.15)
                 self.assertEqual(p['props']['pageBreakBefore'], level == 1)
                 self.assertTrue(p['props']['keepNext'])
 
     def test_subheading_checks_preserve_check_only_input(self):
-        codes = self.codes([paragraph('1 Глава', spaceAfter=28),
+        codes = self.codes([paragraph('1 Глава', spaceAfter=24.15),
                             paragraph('1.1. Подраздел', pageBreakBefore=True, spaceAfter=0)])
         self.assertTrue({'subheading-spacing', 'subheading-page-break', 'heading-number-dot'} <= codes)
 

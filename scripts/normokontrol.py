@@ -277,6 +277,29 @@ def detect_toc(body):
     return next(iter(detect_tocs(body)), None)
 
 
+def manual_toc_indices(body):
+    """Protect recognizable paragraph entries; never guess an arbitrary TOC's end."""
+    active=False
+    found=set()
+    for i,b in enumerate(body):
+        if b['kind']!='para':
+            active=False
+            continue
+        text=b.get('text','')
+        if norm(text) in {'содержание','оглавление'}:
+            active=True
+            continue
+        if not active:
+            continue
+        if not norm(text):
+            found.add(i)
+        elif re.fullmatch(r'TOC[1-9]',b.get('props',{}).get('style',''),re.I) or re.search(r'(?:\t|\.{2,}|…|\s{2,})\s*\d+\s*$',text):
+            found.add(i)
+        else:
+            active=False
+    return found
+
+
 def auto_toc_text(body):
     """Strip only generated TOC field results, retaining text outside the field."""
     stack, result = [], {}
@@ -343,7 +366,7 @@ def table_caption(body, index):
     return None
 
 
-def normalize_model(model, mode, changes):
+def normalize_model(model, mode, changes, heading_gap=None):
     from structure import analyze
     structure = analyze(model)
     from list_formatting import normalize as normalize_list
@@ -352,10 +375,11 @@ def normalize_model(model, mode, changes):
     toc = detect_toc(body)
     start = body_start(model)
     auto_toc = auto_toc_text(body)
+    manual_toc = manual_toc_indices(body)
     refs = next((i for i, p in enumerate(body) if p["kind"] == "para" and
                  norm(p.get("text", "")) in {"список использованных источников", "библиографический список"}), None)
     for i, block in enumerate(body):
-        if (i,) in auto_toc:
+        if (i,) in auto_toc or i in manual_toc:
             continue  # Generated field entries are not document headings.
         if i < start:
             # Title typography and the signature table are taken from the user's document.
@@ -376,7 +400,7 @@ def normalize_model(model, mode, changes):
             if level:
                 props.update({"keepNext": True, "keepLines": True, "suppressHyphens": True})
                 # Appendix Е applies heading/text separation to every heading level.
-                props.update(spaceAfter=PROFILE['chapter_gap_pt'] if level == 1 else PROFILE['subheading_gap_pt'],
+                props.update(spaceAfter=heading_gap if heading_gap is not None else (PROFILE['chapter_gap_pt'] if level == 1 else PROFILE['subheading_gap_pt']),
                              outlineLevel=level - 1)
                 if level > 1:
                     # Explicit False also overrides a page break inherited from Heading 1.
@@ -987,6 +1011,9 @@ def update_toc(wc, model, issues, do_fix=True):
         if auto_toc_text(model['body']):
             add_issue(issues, 'toc-auto-review', 'Автоматическое оглавление распознано и сохранено. Проверьте его строки и номера страниц в итоговом PDF; построчная проверка реализована для содержания-таблицы.')
             return
+        if any(b['kind']=='para' and norm(b.get('text','')) in {'содержание','оглавление'} for b in model['body']):
+            add_issue(issues,'toc-manual-review','Содержание оформлено обычными абзацами. Распознанные строки сохранены; полнота состава и номера страниц автоматически не подтверждены. Второе содержание не добавлено (§6.4).')
+            return
         if len(wc.execute("document.layout")["pages"]) > 10:
             add_issue(issues, "toc-missing", "Не найдено содержание в виде таблицы из двух или четырёх столбцов.")
         return
@@ -1038,7 +1065,7 @@ def update_toc(wc, model, issues, do_fix=True):
     add_issue(issues, "toc-convergence", "Содержание не стабилизировалось за четыре пересчёта; проверьте страницы вручную.")
 
 
-def structural_checks(wc, model, mode, issues):
+def structural_checks(wc, model, mode, issues, heading_gap=None):
     if body_start(model)>=len(model['body']):
         from cover_checks import inspect
         inspect(model,issues)
@@ -1046,7 +1073,7 @@ def structural_checks(wc, model, mode, issues):
     from rules_checks import check_rules
     from illustration_checks import check as check_illustrations
     check_illustrations(model,issues)
-    check_rules(model, mode, issues)
+    check_rules(model, mode, issues, heading_gap=heading_gap)
     if mode=='full':
         from cover_checks import inspect
         inspect(model,issues)
@@ -1233,23 +1260,24 @@ def effective_para(model, para):
 
 
 def write_report(path, report):
-    from reporting import render
+    from reporting import render, render_changes, render_sources
     esc = html.escape
     findings = render(report['issues'])
-    changes = "".join(f"<li>{esc(s)}</li>" for s in report["changes"]) or "<li>Оформление не изменялось.</li>"
+    changes = render_changes(report['changes'])
+    sources = render_sources(report['changes']+[i['message'] for i in report['issues']])
     text = f'''<!doctype html><html lang="ru"><meta charset="utf-8"><title>Нормоконтроль</title>
 <style>body{{font:17px/1.6 system-ui;max-width:950px;margin:40px auto;padding:0 24px;color:#20242b}}
 h1{{font-size:28px}}li{{margin:8px 0}}.note{{background:#f0f3f6;padding:18px;border-radius:10px}}
-a{{color:#1257a4}}small{{color:#596574}}</style>
+a{{color:#1257a4}}small{{color:#596574}}pre{{white-space:pre-wrap;font:inherit;background:#f0f3f6;padding:16px}}article{{scroll-margin-top:24px}}</style>
 <h1>Нормоконтроль ИрГУПС</h1><p>{esc(report['input'])}</p>
 <p><a href="{quote(report['docx_name'])}">Открыть DOCX</a> · <a href="{quote(report['pdf_name'])}">Открыть PDF</a></p>
 <p>Страниц: <strong>{report['pages']}</strong>. Профиль: {esc(report['mode'])}. Wordcraft: {esc(report['wordcraft'])}.</p>
-<h2>Что сделано</h2><ul>{changes}</ul><h2>Что проверить</h2>{findings}
+<h2 id="changes">Что сделано</h2>{changes}<h2>Что проверить</h2>{findings}
 <p class="note">Это результат автоматической проверки оформления, а не подпись нормоконтролёра.
 Проверьте PDF глазами: титульник, рамки и штампы, рисунки, таблицы, пустые места и последний лист.
 Смысл текста, правильность ФИО и шифра, актуальность источников, порядок приложений и грамматика
 табличных заголовков требуют отдельной проверки. PDF создан Wordcraft; совпадение вёрстки с Microsoft Word не проверялось.</p>
-<small>Исходный файл не изменён. {esc(report['created'])}</small></html>'''
+<small>Исходный файл не изменён. {esc(report['created'])}</small>{sources}</html>'''
     path.write_text(text, encoding="utf-8")
 
 
@@ -1291,6 +1319,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
     with tempfile.TemporaryDirectory(prefix="wordcraft-normokontrol-") as temp:
         temp = Path(temp)
         with Wordcraft(cli,cancel_event=cancel_event) as wc:
+            from heading_spacing import measure as measure_heading_spacing
+            heading_gap=measure_heading_spacing(wc,temp)
             wc.open(source)
             wc.save(temp / "source.json")
             model = json.loads((temp / "source.json").read_text(encoding="utf-8"))
@@ -1311,7 +1341,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                         format_cover(model,changes)
                 from normative import prepare as normative_prepare
                 normative_prepare(model,changes,issues)
-                if mode=='full' and original_pages>10 and detect_toc(model['body']) is None and not auto_toc_text(model['body']):
+                manual_toc=any(b['kind']=='para' and norm(b.get('text','')) in {'содержание','оглавление'} for b in model['body'])
+                if mode=='full' and original_pages>10 and detect_toc(model['body']) is None and not auto_toc_text(model['body']) and not manual_toc:
                     from structure import analyze
                     structure=analyze(model)
                     toc_entries=[p['text'].replace('\ufffc','').strip() for i,p in enumerate(model['body']) if i in structure['levels'] and norm(p.get('text',''))!='содержание']
@@ -1336,7 +1367,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 progress("Строю рамки и штампы с точными стыками…")
                 preserving(model, apply_frames, metadata, changes, issues)
             if format_text and not check_only:
-                preserving(model, normalize_model, mode, changes)
+                preserving(model, normalize_model, mode, changes, heading_gap=heading_gap)
+                changes.append(f'Расстояние после заголовков: добавлен один измеренный шаг строк Wordcraft ({heading_gap:.2f} пт); для заголовка перед обычным текстом суммарно два шага без пустого абзаца (приложение Е).')
             if not check_only:
                 (temp / "formatted.json").write_text(json.dumps(model, ensure_ascii=False), encoding="utf-8")
                 wc.open(temp / "formatted.json")
@@ -1370,7 +1402,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 raise RuntimeError("После сохранения изменилось число таблиц или разделов. Результат не выдан.")
             if result_inventory["media"] != original["media"]:
                 add_issue(issues, "media", "Набор файлов изображений изменился при сохранении: проверьте рисунки и объекты. Возможна перекодировка формата.")
-            structural_checks(wc, final, mode, issues)
+            structural_checks(wc, final, mode, issues, heading_gap=heading_gap)
             if mode=='full':
                 position(wc,final,temp,[],issues,do_fix=False)
             # Recheck final table/caption geometry without mutating it.
@@ -1413,7 +1445,9 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
               "docx_name": docx_path.name, "pdf_name": pdf_path.name,
               "automated_only": True, "word_render_verified": False,
               "output": str(output), "check_only": check_only}
-    report['format_profile'] = PROFILE
+    report['format_profile'] = dict(PROFILE,chapter_gap_pt=heading_gap,subheading_gap_pt=heading_gap)
+    from reporting import change_details
+    report['change_details']=change_details(changes)
     from document_policy import kind
     report['document_kind']=kind(final)
     if created_from_template:

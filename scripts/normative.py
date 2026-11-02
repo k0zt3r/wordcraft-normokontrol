@@ -36,11 +36,14 @@ def prepare(model,changes,issues):
                 label='.'.join(map(str,number))+' '
                 if replace(p,start,end,label):
                     p.setdefault('props',{})['numbering']={'num':0,'level':0}
+                    if p['text']!=raw:
+                        changes.append(f'Номер заголовка приведён к структуре документа (§7.2.2): «{raw}» → «{p["text"]}».')
                     if number!=structure['numbers'].get(i):
                         add_issue(issues,'heading-reference-review','Исправлена принадлежность подраздела главе. Проверьте ссылки на старые номера; неоднозначные ссылки автоматически не заменяются.')
         if text=='список литературы':
             start=raw.lower().find('список литературы')
-            if start>=0:replace(p,start,start+len('список литературы'),'Список использованных источников')
+            if start>=0 and replace(p,start,start+len('список литературы'),'Список использованных источников'):
+                changes.append('Заголовок «Список литературы» заменён на «Список использованных источников» (§6.10).')
     for _,p in paragraphs(model['body'][:body_start(model)]):
         for match in reversed(list(REG_NUMBER_RE.finditer(p.get('text','')))):
             corrected=code(match[0])

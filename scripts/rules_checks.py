@@ -2,7 +2,7 @@
 import re
 
 
-def check_rules(model, mode, issues):
+def check_rules(model, mode, issues, heading_gap=None):
     from format_profile import PROFILE
     from structure import analyze
     structure = analyze(model)
@@ -26,7 +26,7 @@ def check_rules(model, mode, issues):
                     add_issue(issues,'bibliography-format-review','Описание источника начинается с URL. Проверьте состав и порядок библиографических сведений по §6.10 и разделу 9; недостающие данные не выдумываются.')
     start = body_start(model)
     automatic = auto_toc_text(body)
-    toc = set(detect_tocs(body))
+    toc = structure['toc']
     headings = set()
     counters = {}
     appendices = []
@@ -40,10 +40,10 @@ def check_rules(model, mode, issues):
         props = effective_para(model, para)
         level = structure['levels'].get(path[0]) if len(path) == 1 else None
         if level:
-            if level == 1 and (props.get('spaceAfter') or 0) < PROFILE['chapter_gap_pt'] - .1:
+            if level == 1 and abs((props.get('spaceAfter') or 0) - (heading_gap if heading_gap is not None else PROFILE['chapter_gap_pt'])) > .1:
                 add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')
             if level > 1:
-                if abs((props.get('spaceAfter') or 0) - PROFILE['subheading_gap_pt']) > .1:
+                if abs((props.get('spaceAfter') or 0) - (heading_gap if heading_gap is not None else PROFILE['subheading_gap_pt'])) > .1:
                     add_issue(issues, 'subheading-spacing', f'Проверьте расстояние между заголовком и текстом по общему правилу приложения Е (два интервала): {text}')
                 if props.get('pageBreakBefore'):
                     add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}')
