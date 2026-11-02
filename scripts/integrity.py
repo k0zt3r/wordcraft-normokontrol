@@ -32,7 +32,13 @@ def original_text(path):
         if node.tag == W + 'txbxContent':
             return  # Textbox stories are checked separately on roundtrip.
         if node.tag == W + 'p':
-            elements = list(node.iter())
+            def inline(element):
+                if element.tag == W+'txbxContent':
+                    return
+                yield element
+                for child in element:
+                    yield from inline(child)
+            elements = list(inline(node))
             has_field = any(e.tag in {W+'fldChar', W+'fldSimple'} for e in elements)
             for e in elements:
                 if e.tag == W+'fldChar':

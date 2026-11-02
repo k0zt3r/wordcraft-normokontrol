@@ -14,6 +14,35 @@ from test_rules_checks import paragraph as p
 
 
 class AuditTests(unittest.TestCase):
+    def test_cancellation_stops_private_wordcraft(self):
+        import threading
+        from runtime import ProcessingCancelled
+        event=threading.Event()
+        with nk.Wordcraft(nk.find_cli(),cancel_event=event) as wc:
+            event.set()
+            with self.assertRaises(ProcessingCancelled):
+                wc.execute('document.layout')
+        self.assertIsNotNone(wc.proc.poll())
+
+    def test_opt_in_preferences_and_forget(self):
+        from preferences import save,load
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'prefs.json'
+            save({'author':'Test'},True,path)
+            self.assertEqual(load(path)['details']['author'],'Test')
+            save({},False,path)
+            self.assertFalse(path.exists())
+
+    def test_report_groups_and_escapes_findings(self):
+        from reporting import render
+        issues=[]
+        nk.add_issue(issues,'font','<script>bad</script>')
+        nk.add_issue(issues,'font','Another paragraph')
+        text=render(issues)
+        self.assertEqual(text.count('<details>'),1)
+        self.assertNotIn('<script>',text)
+        self.assertIn('(2)',text)
+
     def test_import_loss_is_detected(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'source.docx'

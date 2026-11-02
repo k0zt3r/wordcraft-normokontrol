@@ -6,6 +6,33 @@ from normokontrol_gui import install_edit_shortcuts
 
 
 class ClipboardTests(unittest.TestCase):
+    def test_main_window_has_result_controls_and_scrollable_title(self):
+        from unittest.mock import patch
+        import normokontrol_gui as gui
+        original=tk.Tk
+        roots=[]
+        def create():
+            root=original()
+            root.withdraw()
+            root.mainloop=lambda:None
+            roots.append(root)
+            return root
+        try:
+            with patch.object(gui.tk,'Tk',create):
+                gui.show(None,None)
+            root=roots[0]
+            def children(widget):
+                yield widget
+                for child in widget.winfo_children():
+                    yield from children(child)
+            widgets=list(children(root))
+            texts={w.cget('text') for w in widgets if w.winfo_class()=='TButton'}
+            self.assertTrue({'DOCX','PDF','Папка','Отмена','Оформление'} <= texts)
+            self.assertTrue(any(w.winfo_class()=='Canvas' for w in widgets))
+        finally:
+            for root in roots:
+                root.destroy()
+
     def test_clipboard_entry_and_multiline(self):
         root = tk.Tk()
         root.withdraw()

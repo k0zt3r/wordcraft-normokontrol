@@ -45,7 +45,7 @@ class RuleTests(unittest.TestCase):
         self.assertTrue({'heading-sequence', 'heading-parent', 'heading-number'} <= codes)
         valid = self.codes([paragraph('1 Раздел', spaceAfter=28),
                             paragraph('1.1 Подраздел', spaceAfter=0),
-                            paragraph('2 Раздел', spaceAfter=28)])
+                            paragraph('2 Раздел', spaceAfter=28, outlineLevel=0)])
         self.assertFalse(valid)
 
     def test_inherited_color_indent_and_heading_spacing(self):

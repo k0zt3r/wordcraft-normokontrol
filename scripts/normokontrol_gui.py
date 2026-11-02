@@ -57,6 +57,9 @@ def install_edit_shortcuts(root):
 
 
 def show(process, create_document, initial=None):
+    from preferences import load as load_preferences, save as save_preferences, profile_dialog
+    from runtime import ProcessingCancelled
+    saved=load_preferences()
     root = tk.Tk()
     root.title("Нормоконтроль ИрГУПС · Wordcraft")
     root.geometry("980x800")
@@ -85,6 +88,14 @@ def show(process, create_document, initial=None):
               ("faculty", "Факультет"), ("department", "Кафедра"),
               ("stamp_title", "Краткое название в штампе"))
     details = {key: tk.StringVar() for key, _ in fields}
+    remember=tk.BooleanVar(value=bool(saved.get('remember')))
+    if remember.get() and isinstance(saved.get('details'),dict):
+        for key,value in saved['details'].items():
+            if key in details and isinstance(value,str):
+                details[key].set(value)
+    cancel_event=threading.Event()
+    last_result={}
+    closing=[False]
     approval = tk.BooleanVar(value=False)
     approval_person, approval_title = tk.StringVar(), tk.StringVar()
     extra_sections = {key:tk.BooleanVar(value=False) for key in ('annotation','normative','abbreviations')}
@@ -112,6 +123,21 @@ def show(process, create_document, initial=None):
     notebook.add(reg_tab, text="Регистрационный номер")
     notebook.add(toc_tab, text="Содержание")
     notebook.add(ref_tab, text="Список литературы")
+    # The title form is taller than a typical laptop window; keep it scrollable.
+    title_shell=title_tab
+    canvas=tk.Canvas(title_shell,height=400,width=850,highlightthickness=0)
+    scroll=ttk.Scrollbar(title_shell,orient='vertical',command=canvas.yview)
+    canvas.configure(yscrollcommand=scroll.set)
+    scroll.pack(side='right',fill='y')
+    canvas.pack(side='left',fill='both',expand=True)
+    title_tab=ttk.Frame(canvas,padding=2)
+    window=canvas.create_window((0,0),window=title_tab,anchor='nw')
+    title_tab.bind('<Configure>',lambda _:canvas.configure(scrollregion=canvas.bbox('all')))
+    canvas.bind('<Configure>',lambda event:canvas.itemconfigure(window,width=event.width))
+    def scroll_title(event):
+        if notebook.select()==str(title_shell):
+            canvas.yview_scroll(-int(event.delta/120),'units')
+    root.bind('<MouseWheel>',scroll_title,add='+')
     ttk.Label(title_tab, text="Пустые поля сохраняют исходные данные. Должность заменяется целиком: например, «к.т.н., доцент каф. ИСиЗИ».", wraplength=860).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 12))
     ttk.Label(title_tab, text=UNIVERSITY_FULL+'\n('+UNIVERSITY_SHORT+')', wraplength=860, foreground='#4b5968').grid(row=1,column=0,columnspan=4,sticky='w',pady=(0,8))
     for n, (key, label) in enumerate(fields):
@@ -135,6 +161,7 @@ def show(process, create_document, initial=None):
     for row,(text,var) in enumerate((('Фамилия И.О. допускающего',approval_person),('Должность / регалии допускающего',approval_title)),last_row+1):
         ttk.Label(title_tab,text=text).grid(row=row,column=0,columnspan=2,sticky='w',pady=4)
         ttk.Entry(title_tab,textvariable=var).grid(row=row,column=2,columnspan=2,sticky='ew',pady=4)
+    ttk.Checkbutton(title_tab,text='Запоминать реквизиты на этом компьютере',variable=remember).grid(row=last_row+3,column=0,columnspan=4,sticky='w',pady=6)
 
     ttk.Label(reg_tab,text='По §6.2: учебные работы — без учётного номера; ВКР — с номером кафедры и годом. Код подразделения — 6 цифр. Длина шифра не фиксирована.',wraplength=860).grid(row=0,column=0,columnspan=2,sticky='w',pady=(0,12))
     entries=(('Вид работы',reg['work_code'],tuple(WORK_TYPES)),('Код подразделения',reg['division_code'],None),
@@ -225,27 +252,58 @@ def show(process, create_document, initial=None):
                        toc_template=toc_option.get(), bibliography_template=bibliography.get(),
                        toc_entries=[s.strip() for s in toc_text.get("1.0", "end").splitlines() if s.strip()],
                        bibliography_entries=[s.strip() for s in ref_text.get("1.0", "end").splitlines() if s.strip()])
+        try:
+            save_preferences({k:v.get().strip() for k,v in details.items()},remember.get())
+        except OSError as error:
+            messagebox.showerror('Реквизиты',str(error),parent=root)
+            return
+        cancel_event.clear()
+        options['cancel_event']=cancel_event
         options['metadata'].update({'approval':approval.get(),'approval_person':approval_person.get().strip(),'approval_title':approval_title.get().strip()})
         options['optional_sections']=[key for key,var in extra_sections.items() if var.get()]
         button.configure(state="disabled")
+        cancel_button.configure(state='normal')
         bar.start(15)
         def worker():
             try:
                 progress = lambda m: events.put(("status", m))
                 result = create_document(out, progress=progress, **options) if creating else process(input_path, progress=progress, **options)
                 events.put(("done", result))
+            except ProcessingCancelled as error:
+                events.put(('cancelled',str(error)))
             except Exception as error:
                 events.put(("error", str(error)))
         threading.Thread(target=worker, daemon=True).start()
     button = ttk.Button(pane, text="Выполнить нормоконтроль", command=run)
     button.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
     from updater import show_updates
-    ttk.Button(pane, text='Проверить обновления', command=lambda: show_updates(root, lambda: str(button.cget('state')) == 'disabled')).grid(row=10, column=0, columnspan=3, sticky='e', pady=(8, 0))
+    actions=ttk.Frame(pane)
+    actions.grid(row=10,column=0,columnspan=3,sticky='ew',pady=(8,0))
+    def cancel():
+        cancel_event.set()
+        status.set('Отменяю обработку и закрываю Wordcraft…')
+        cancel_button.configure(state='disabled')
+    cancel_button=ttk.Button(actions,text='Отмена',command=cancel,state='disabled')
+    cancel_button.pack(side='left')
+    def open_result(kind):
+        if last_result:
+            path=Path(last_result['output'])
+            if kind!='folder':
+                path=path/last_result[kind+'_name']
+            try:
+                os.startfile(str(path))
+            except OSError as error:
+                messagebox.showerror('Открыть результат',str(error),parent=root)
+    for label,kind in [('DOCX','docx'),('PDF','pdf'),('Папка','folder')]:
+        ttk.Button(actions,text=label,command=lambda k=kind:open_result(k)).pack(side='left',padx=3)
+    ttk.Button(actions,text='Оформление',command=lambda:profile_dialog(root)).pack(side='left',padx=3)
+    ttk.Button(actions,text='Обновления',command=lambda:show_updates(root,lambda:str(button.cget('state'))=='disabled')).pack(side='right')
     pane.columnconfigure(0, weight=1)
     pane.rowconfigure(5, weight=1)
     def close():
         if str(button.cget("state")) == "disabled":
-            status.set("Дождитесь завершения обработки документа.")
+            closing[0]=True
+            cancel()
         else:
             root.destroy()
     root.protocol("WM_DELETE_WINDOW", close)
@@ -258,15 +316,30 @@ def show(process, create_document, initial=None):
                 else:
                     bar.stop()
                     button.configure(state="normal")
+                    cancel_button.configure(state='disabled')
+                    if closing[0]:
+                        root.destroy()
+                        return
                     if kind == "error":
                         status.set("Не удалось завершить. Исходник не изменён.")
                         messagebox.showerror("Нормоконтроль", value)
+                    elif kind=='cancelled':
+                        status.set(value)
                     else:
+                        last_result.clear()
+                        last_result.update(value)
                         status.set(f"Готово. {value['pages']} стр., замечаний: {len(value['issues'])}.")
-                        os.startfile(str(Path(value["output"]) / "report.html"))
+                        try:
+                            os.startfile(str(Path(value["output"]) / "report.html"))
+                        except OSError as error:
+                            status.set(f'Готово. Отчёт сохранён в {value["output"]}. Не удалось открыть: {error}')
         except queue.Empty:
             pass
         root.after(150, poll)
     root.after(150, poll)
     install_edit_shortcuts(root)
+    root.update_idletasks()
+    available=max(600,root.winfo_screenheight()-80)
+    root.minsize(920,min(740,available))
+    root.geometry(f"{max(980,root.winfo_reqwidth())}x{min(available,max(800,root.winfo_reqheight()))}")
     root.mainloop()

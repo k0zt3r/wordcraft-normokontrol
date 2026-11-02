@@ -5,11 +5,18 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import tempfile
+import os
+import runpy
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 REPO = 'k0zt3r/wordcraft-normokontrol'
 ROOT = Path(__file__).resolve().parent.parent
+REQUIRED = ('VERSION','run.cmd','normokontrol.py','_normokontrol_recovery.py','requirements.txt',
+            'assets/course-templates.json','assets/format-profile.json',
+            *('scripts/'+name+'.py' for name in ('normokontrol','normokontrol_gui','irgups_data','captions',
+               'list_formatting','whitespace_cleanup','document_cleanup','rules_checks','structure',
+               'integrity','format_profile','pdf_checks','atomic_files','runtime','reporting','preferences','updater')))
 
 
 def fetch(url):
@@ -46,8 +53,12 @@ def install(update, root=ROOT):
 
 
 def install_archive(payload, expected_version, root):
+    from atomic_files import write_json
+    root=Path(root).resolve()
+    if (root/'.normokontrol-update.json').exists():
+        raise ValueError('Предыдущее обновление не завершено. Перезапустите программу для восстановления.')
     allowed = {'VERSION', 'normokontrol.py', 'run.cmd', 'requirements.txt',
-               'requirements-dev.txt', 'README.md', 'LICENSE', 'Normokontrol.pdf'}
+               'requirements-dev.txt', 'README.md', 'LICENSE', 'Normokontrol.pdf', '_normokontrol_recovery.py'}
     files = {}
     with ZipFile(io.BytesIO(payload)) as archive:
         if sum(i.file_size for i in archive.infolist()) > 60 * 1024 * 1024:
@@ -66,7 +77,7 @@ def install_archive(payload, expected_version, root):
             if rel in files:
                 raise ValueError('Повторяющийся файл в архиве.')
             files[rel] = archive.read(item)
-    for required in ('VERSION', 'run.cmd', 'scripts/normokontrol.py', 'scripts/normokontrol_gui.py', 'requirements.txt'):
+    for required in REQUIRED:
         if Path(required) not in files:
             raise ValueError('Архив обновления неполон.')
     if files[Path('VERSION')].decode().strip() != expected_version:
@@ -74,23 +85,31 @@ def install_archive(payload, expected_version, root):
     if files[Path('requirements.txt')].splitlines() != (root / 'requirements.txt').read_bytes().splitlines():
         raise ValueError('В этой версии изменились зависимости. Скачайте новый ZIP и выполните установку по README.')
     backup = Path(tempfile.mkdtemp(prefix='normokontrol-backup-', dir=root))
-    changed = []
+    staged=backup/'.staged'
+    entries=[]
+    # Recovery loader and launcher must precede application changes; VERSION commits last.
+    first={'_normokontrol_recovery.py':0,'normokontrol.py':1,'run.cmd':2}
+    ordered=sorted(files,key=lambda rel:(99 if rel==Path('VERSION') else first.get(rel.as_posix(),3),rel.as_posix()))
+    for rel in ordered:
+        target=root/rel
+        (staged/rel).parent.mkdir(parents=True,exist_ok=True)
+        (staged/rel).write_bytes(files[rel])
+        if target.exists():
+            (backup/rel).parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(target,backup/rel)
+        entries.append({'path':rel.as_posix(),'existed':target.exists()})
+    journal=root/'.normokontrol-update.json'
+    write_json(journal,{'backup':backup.name,'files':entries,'pid':os.getpid()})
     try:
-        for rel, data in files.items():
+        for rel in ordered:
             target = root / rel
-            existed = target.exists()
-            if existed:
-                (backup / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(target, backup / rel)
-            changed.append((rel, existed))
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-    except Exception:
-        for rel, existed in reversed(changed):
-            if existed:
-                shutil.copy2(backup / rel, root / rel)
-            else:
-                (root / rel).unlink(missing_ok=True)
+            os.replace(staged/rel,target)
+        journal.unlink()
+    except BaseException:
+        # Load trusted recovery from the running checkout, not the archive under test.
+        recovery=runpy.run_path(str(ROOT/'_normokontrol_recovery.py'))
+        recovery['recover'](root,force=True)
         raise
     return backup
 

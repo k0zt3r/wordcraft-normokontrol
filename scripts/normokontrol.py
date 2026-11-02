@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import copy
-from collections import Counter
+from collections import Counter, deque
 from contextlib import AbstractContextManager
 from datetime import datetime
 import hashlib
@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import quote
 from zipfile import ZipFile
 import xml.etree.ElementTree as ET
@@ -66,19 +67,34 @@ def find_cli(explicit=None):
 
 class Wordcraft(AbstractContextManager):
     """Private headless MCP process; no changes to the user's open app/session."""
-    def __init__(self, cli, timeout=60):
+    def __init__(self, cli, timeout=60, cancel_event=None):
         self.timeout = timeout
+        self.cancel_event = cancel_event
+        self.diagnostics = deque(maxlen=40)
         self.seq = 0
         self.responses = queue.Queue()
         self.proc = subprocess.Popen(
             [cli, "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", bufsize=1,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", errors='replace', bufsize=1,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         threading.Thread(target=self._reader, daemon=True).start()
-        self.rpc("initialize", {"protocolVersion": "2024-11-05",
-                 "capabilities": {}, "clientInfo": {"name": "irgups-normokontrol", "version": "1.0"}})
-        self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
-        self.proc.stdin.flush()
+        threading.Thread(target=self._stderr_reader, daemon=True).start()
+        try:
+            self.rpc("initialize", {"protocolVersion": "2024-11-05",
+                     "capabilities": {}, "clientInfo": {"name": "irgups-normokontrol", "version": "1.0"}})
+            self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+            self.proc.stdin.flush()
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def _stderr_reader(self):
+        for line in self.proc.stderr:
+            self.diagnostics.append(line.rstrip()[:1000])
+
+    def failure(self, message):
+        detail = '\n'.join(self.diagnostics)[-3000:]
+        return RuntimeError(message + ('\nДиагностика Wordcraft:\n' + detail if detail else ''))
 
     def _reader(self):
         try:
@@ -90,17 +106,24 @@ class Wordcraft(AbstractContextManager):
             self.responses.put(None)
 
     def rpc(self, method, params):
+        from runtime import check_cancel
+        check_cancel(self.cancel_event)
         self.seq += 1
         request = {"jsonrpc": "2.0", "id": self.seq, "method": method, "params": params}
         self.proc.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self.proc.stdin.flush()
+        deadline = time.monotonic() + self.timeout
         while True:
+            check_cancel(self.cancel_event)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self.failure(f'Wordcraft не ответил за {self.timeout} секунд: {method}')
             try:
-                reply = self.responses.get(timeout=self.timeout)
+                reply = self.responses.get(timeout=min(.1,remaining))
             except queue.Empty:
-                raise RuntimeError(f"Wordcraft не ответил за {self.timeout} секунд: {method}") from None
+                continue
             if reply is None:
-                raise RuntimeError("Wordcraft завершился до ответа.")
+                raise self.failure('Wordcraft завершился до ответа.')
             if isinstance(reply, Exception):
                 raise RuntimeError(f"Ошибка ответа Wordcraft: {reply}")
             if reply.get("id") != self.seq:
@@ -161,9 +184,15 @@ class Wordcraft(AbstractContextManager):
             self.proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             self.proc.terminate()
-            self.proc.wait(timeout=5)
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=5)
         if self.proc.stdout:
             self.proc.stdout.close()
+        if self.proc.stderr:
+            self.proc.stderr.close()
 
 
 def paragraphs(blocks, prefix=()):
@@ -348,7 +377,7 @@ def normalize_model(model, mode, changes):
                     props["pageBreakBefore"] = False
                 centered = effective_para(model, block).get('align') == 'center'
                 props.update({'align': 'center' if centered else 'left',
-                              'indentFirst': 0.0 if centered else 10 * MM})
+                              'indentFirst': 0.0 if centered else PROFILE['body_indent_mm'] * MM})
                 if level == 1 and i > start and norm(block["text"]) != "содержание":
                     props["pageBreakBefore"] = True
             elif CAPTION.match(block.get("text", "")):
@@ -371,7 +400,7 @@ def normalize_model(model, mode, changes):
             normalize_list(model, block, level, list_cache)
             literal_item = NUMBERED_HEADING.match(norm(block.get('text', '')))
             if not level and literal_item and literal_item[2] and '.' not in literal_item[1]:
-                props.update(align='left', indentFirst=10 * MM, keepNext=False,
+                props.update(align='left', indentFirst=PROFILE['body_indent_mm'] * MM, keepNext=False,
                              pageBreakBefore=False, outlineLevel=9)
         elif block["kind"] == "table":
             caption = table_caption(body, i)
@@ -410,7 +439,7 @@ def normalize_model(model, mode, changes):
         page_para = {"kind": "para", "text": "\ufffc", "runs": [{"len": 3, "props": {}}],
                      "props": {"align": "center", "spaceAfter": 0.0},
                      "objects": [{"type": "field", "instr": "PAGE", "result": "1", "locked": False}]}
-        font(page_para, 14)
+        font(page_para, PROFILE['text_size'])
         model["parts"][str(part_id)] = {"kind": "footer", "blocks": [page_para]}
         for section in sections:
             section.update({"marginLeft": 30 * MM, "marginRight": 15 * MM,
@@ -619,7 +648,7 @@ def apply_frames(model, metadata, changes, issues):
         if saved_part["kind"] not in {"header", "footer", "textBox"}:
             visit(saved_part)
     model["parts"] = {k: v for k, v in model["parts"].items() if int(k) in reachable or v["kind"] not in {"header", "footer", "textBox"}}
-    changes.append("Построены штампы текстовых документов по И.3 и И.4 (стр.44): ISOCPEUR, шифр 16 пт, остальные надписи 9 пт; линии 0,75 пт, титульник без рамки.")
+    changes.append(f"Построены штампы текстовых документов по И.3 и И.4 (стр.44): {STAMP_FONT}, шифр {STAMP_CODE_SIZE} пт, остальные надписи {STAMP_SIZE} пт; линии {FRAME_STROKE} пт, титульник без рамки.")
 
 
 def add_templates(model, toc_template, bibliography, changes, toc_entries=None, bibliography_entries=None):
@@ -629,7 +658,7 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
         p = {"kind": "para", "text": text, "runs": [{"len": byte_len(text), "props": {}}],
              "props": {"outlineLevel": 0, "align": "center", "keepNext": True,
                        "pageBreakBefore": True, "spaceAfter": 21.0}}
-        font(p, 14)
+        font(p, PROFILE['text_size'])
         return p
     def table(widths, count):
         edges = {e: {"style": "none", "width": 0.0} for e in ("top", "bottom", "left", "right", "between", "insideH", "insideV")}
@@ -656,7 +685,7 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
                 for ci, value in enumerate(("", match.group(1) if match else "", match.group(2) if match else entry.strip(), "")):
                     p = row["cells"][ci]["blocks"][0]
                     p["text"] = value
-                    p["runs"] = [{"len": byte_len(value), "props": {"font": FONT, "size": 14.0}}]
+                    p["runs"] = [{"len": byte_len(value), "props": {"font": FONT, "size": PROFILE['text_size']}}]
                 rows.append(row)
             target["rows"] = rows
             changes.append("Содержание заполнено введёнными строками; страницы пересчитаны для найденных заголовков.")
@@ -676,7 +705,7 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
                 for ci, value in enumerate((str(n), entry.strip())):
                     p = row["cells"][ci]["blocks"][0]
                     p["text"] = value
-                    p["runs"] = [{"len": byte_len(value), "props": {"font": FONT, "size": 14.0}}]
+                    p["runs"] = [{"len": byte_len(value), "props": {"font": FONT, "size": PROFILE['text_size']}}]
                 rows.append(row)
             body[index + 1]["rows"] = rows
             changes.append("Источники помещены в таблицу из курсача; номера без точки, описания сохранены без выдумывания данных.")
@@ -704,7 +733,7 @@ def fill_cover(model, metadata, changes):
         cover = copy.deepcopy(template["title"])
         for _, paragraph in paragraphs(cover):
             if paragraph.get("text", "").strip():
-                font(paragraph, 14)
+                font(paragraph, PROFILE['text_size'])
         cover[-1]["section"] = copy.deepcopy(model["lastSection"])
         body[:0] = cover
         start = len(cover)
@@ -720,7 +749,7 @@ def fill_cover(model, metadata, changes):
         p["text"] = text
         p["runs"] = [{"len": byte_len(text), "props": props}]
         p.pop("objects", None)
-        font(p, 14)
+        font(p, PROFILE['text_size'])
     if fresh:
         for index, key, prefix in ((5, "university", ""), (6, "university_short", ""), (7, "faculty", "Факультет "), (8, "department", "Кафедра ")):
             if metadata.get(key):
@@ -922,7 +951,8 @@ def repair_layout(wc, model, mode, changes, issues, do_fix=True):
 
 
 def add_issue(issues, code, message, page=None):
-    item = {"code": code, "message": message, "page": page}
+    from reporting import severity
+    item = {"code": code, "message": message, "page": page, 'severity':severity(code)}
     if item not in issues:
         issues.append(item)
 
@@ -1172,10 +1202,9 @@ def effective_para(model, para):
 
 
 def write_report(path, report):
+    from reporting import render
     esc = html.escape
-    findings = "".join(f"<li>{esc(x['message'])}" +
-                       (f" <strong>(стр. {x['page']})</strong>" if x.get("page") else "") + "</li>"
-                       for x in report["issues"]) or "<li>В выполненных автоматических проверках замечаний не найдено.</li>"
+    findings = render(report['issues'])
     changes = "".join(f"<li>{esc(s)}</li>" for s in report["changes"]) or "<li>Оформление не изменялось.</li>"
     text = f'''<!doctype html><html lang="ru"><meta charset="utf-8"><title>Нормоконтроль</title>
 <style>body{{font:17px/1.6 system-ui;max-width:950px;margin:40px auto;padding:0 24px;color:#20242b}}
@@ -1184,7 +1213,7 @@ a{{color:#1257a4}}small{{color:#596574}}</style>
 <h1>Нормоконтроль ИрГУПС</h1><p>{esc(report['input'])}</p>
 <p><a href="{quote(report['docx_name'])}">Открыть DOCX</a> · <a href="{quote(report['pdf_name'])}">Открыть PDF</a></p>
 <p>Страниц: <strong>{report['pages']}</strong>. Профиль: {esc(report['mode'])}. Wordcraft: {esc(report['wordcraft'])}.</p>
-<h2>Что сделано</h2><ul>{changes}</ul><h2>Что проверить</h2><ul>{findings}</ul>
+<h2>Что сделано</h2><ul>{changes}</ul><h2>Что проверить</h2>{findings}
 <p class="note">Это результат автоматической проверки оформления, а не подпись нормоконтролёра.
 Проверьте PDF глазами: титульник, рамки и штампы, рисунки, таблицы, пустые места и последний лист.
 Смысл текста, правильность ФИО и шифра, актуальность источников, порядок приложений и грамматика
@@ -1195,7 +1224,9 @@ a{{color:#1257a4}}small{{color:#596574}}</style>
 
 def process(source, out=None, mode="full", format_text=True, check_only=False, cli=None, progress=print, metadata=None,
             toc_template=False, bibliography_template=False, toc_entries=None, bibliography_entries=None, optional_sections=None,
-            created_from_template=False):
+            created_from_template=False, cancel_event=None):
+    from runtime import check_cancel
+    check_cancel(cancel_event)
     metadata = prepare_metadata(metadata)
     source = Path(source).expanduser().resolve()
     if not source.is_file() or source.suffix.casefold() != ".docx":
@@ -1223,7 +1254,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
     progress("Читаю документ через Wordcraft…")
     with tempfile.TemporaryDirectory(prefix="wordcraft-normokontrol-") as temp:
         temp = Path(temp)
-        with Wordcraft(cli) as wc:
+        with Wordcraft(cli,cancel_event=cancel_event) as wc:
             wc.open(source)
             wc.save(temp / "source.json")
             model = json.loads((temp / "source.json").read_text(encoding="utf-8"))
@@ -1294,8 +1325,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                         add_issue(issues, "empty-page", "Возможно, пустая страница.", i + 1)
                     anchors=[s for b in page.get_text('dict')['blocks'] if 'lines' in b for line in b['lines'] for s in line['spans']
                              if s['text'].strip() in {'Изм.','Разраб.','Литера','Пров.'} and s['bbox'][1]>page.rect.height-45*MM]
-                    if anchors and any('ISOCPEUR' not in s['font'].upper() for s in anchors):
-                        add_issue(issues,'stamp-font','ISOCPEUR не отрисован: установите ISOCPEUR Regular/Italic и повторите обработку. В PDF обнаружена подстановка шрифта.',i+1)
+                    if anchors and any(STAMP_FONT.replace(' ','').upper() not in s['font'].replace(' ','').upper() for s in anchors):
+                        add_issue(issues,'stamp-font',f'{STAMP_FONT} не отрисован: установите шрифт и повторите обработку. В PDF обнаружена подстановка.',i+1)
         except ImportError:
             add_issue(issues, "pdf-inspection", "PyMuPDF не установлен: дополнительная проверка PDF пропущена.")
         if hashlib.sha256(source.read_bytes()).hexdigest() != before_hash:
@@ -1320,6 +1351,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
         report.update(input='Новый документ из шаблона курсача',created_from_template=True)
     try:
         from atomic_files import publish, remove_stage
+        check_cancel(cancel_event)
         (stage / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         write_report(stage / "report.html", report)
         publish(stage,output,[docx_path.name,pdf_path.name,'report.json','report.html'])
@@ -1334,7 +1366,7 @@ def create_document(out, **options):
     cli = find_cli(options.get("cli"))
     with tempfile.TemporaryDirectory(prefix="normokontrol-new-") as folder:
         source = Path(folder) / "Новая работа.docx"
-        with Wordcraft(cli) as wc:
+        with Wordcraft(cli,cancel_event=options.get('cancel_event')) as wc:
             wc.call("new_document", template="blank")
             wc.save(source)
         return process(source, out, created_from_template=True, **options)

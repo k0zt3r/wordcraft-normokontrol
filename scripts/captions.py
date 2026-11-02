@@ -3,6 +3,7 @@ import re
 
 
 def fill_captions(model, changes, issues, check_only=False):
+    from format_profile import PROFILE
     from normokontrol import (body_start, detect_tocs, auto_toc_text, norm,
                              next_block, paragraphs, byte_len, font, add_issue)
     body = model['body']
@@ -84,7 +85,7 @@ def fill_captions(model, changes, issues, check_only=False):
         p = {'kind': 'para', 'text': title, 'runs': [{'len': byte_len(title)}],
              'props': {'align': 'center' if kind == 'рисунок' else 'left', 'indentFirst': 0.0,
                        'keepLines': True, 'keepNext': kind == 'таблица'}}
-        font(p, 14)
+        font(p, PROFILE['text_size'])
         plans.append((caption_index if caption_index is not None else i + (kind == 'рисунок'), caption_index is not None, p))
     for _, (index, replace, para) in sorted(enumerate(plans), key=lambda item: (item[1][0], item[0]), reverse=True):
         if replace:

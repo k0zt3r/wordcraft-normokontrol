@@ -11,7 +11,11 @@ def analyze(model):
     toc_names = {norm(p.get('text', '')) for i in toc for _, p in paragraphs([body[i]])}
     levels, numbers, uncertain = {}, {}, []
     native_counts = {}
-    known_chapters = set()
+    child_chapters = {}
+    for i,p in enumerate(body):
+        match = NUMBERED_HEADING.match(norm(p.get('text',''))) if p['kind']=='para' else None
+        if match and '.' in match[1]:
+            child_chapters[int(match[1].split('.')[0])] = i
     for i, p in enumerate(body):
         if p['kind'] != 'para' or i in toc or not norm(p.get('text', '')):
             continue
@@ -20,11 +24,10 @@ def analyze(model):
         props = effective_para(model, p)
         manual = NUMBERED_HEADING.match(text)
         chapter = re.match(r'^глава\s+(\d+)(?:[.\s:–—-]|$)', text)
-        if manual and '.' not in manual[1] and props.get('outlineLevel', 9) >= 9:
+        if manual and '.' not in manual[1] and (props.get('outlineLevel') is None or props['outlineLevel'] >= 9):
             number = int(manual[1])
-            child = any(b['kind'] == 'para' and re.match(r'^' + str(number) + r'\.\d', norm(b.get('text', '')))
-                        for b in body[i+1:])
-            if not child and text not in toc_names and number - 1 not in known_chapters:
+            child = child_chapters.get(number,-1) > i
+            if not child and text not in toc_names:
                 level = None
                 if not manual[2]:
                     uncertain.append(i)
@@ -54,6 +57,4 @@ def analyze(model):
             number = tuple(counts.get(int(t)-1, abstract['levels'][int(t)-1].get('start',1)) for t in tokens)
         if number:
             numbers[i] = number
-            if len(number) == 1:
-                known_chapters.add(number[0])
     return {'levels': levels, 'numbers': numbers, 'uncertain': uncertain, 'toc': toc}

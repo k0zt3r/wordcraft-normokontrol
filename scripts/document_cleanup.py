@@ -88,6 +88,10 @@ def prepare(model, changes, issues, check_only=False):
     native = [bool(effective_para(model,p).get('numbering')) for p in entries]
     # Explicit/native list markers delimit entries; other paragraphs continue them.
     marked = any(explicit) or any(native)
+    labels=[int(match[1] or match[2]) for match in explicit if match]
+    if labels and labels != list(range(1,len(labels)+1)):
+        add_issue(issues,'bibliography-review','Номера источников идут с пропусками или начинаются не с единицы; автоматическая перенумерация могла бы нарушить ссылки. Список оставлен без преобразования.')
+        return
     groups = []
     for p, match, listed in zip(entries, explicit, native):
         if marked:
