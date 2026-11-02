@@ -27,7 +27,10 @@ class ClipboardTests(unittest.TestCase):
                     yield from children(child)
             widgets=list(children(root))
             texts={w.cget('text') for w in widgets if w.winfo_class()=='TButton'}
-            self.assertTrue({'DOCX','PDF','Папка','Отмена','Оформление'} <= texts)
+            self.assertTrue({'Открыть папку','Отмена','Оформление'} <= texts)
+            self.assertFalse({'DOCX','PDF','Папка'} & texts)
+            folder=next(w for w in widgets if w.winfo_class()=='TButton' and w.cget('text')=='Открыть папку')
+            self.assertTrue(folder.instate(['disabled']))
             self.assertTrue(any(w.winfo_class()=='Canvas' for w in widgets))
         finally:
             for root in roots:

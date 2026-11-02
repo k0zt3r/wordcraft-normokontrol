@@ -285,17 +285,15 @@ def show(process, create_document, initial=None):
         cancel_button.configure(state='disabled')
     cancel_button=ttk.Button(actions,text='Отмена',command=cancel,state='disabled')
     cancel_button.pack(side='left')
-    def open_result(kind):
+    def open_result_folder():
         if last_result:
             path=Path(last_result['output'])
-            if kind!='folder':
-                path=path/last_result[kind+'_name']
             try:
                 os.startfile(str(path))
             except OSError as error:
-                messagebox.showerror('Открыть результат',str(error),parent=root)
-    for label,kind in [('DOCX','docx'),('PDF','pdf'),('Папка','folder')]:
-        ttk.Button(actions,text=label,command=lambda k=kind:open_result(k)).pack(side='left',padx=3)
+                messagebox.showerror('Открыть папку',str(error),parent=root)
+    folder_button=ttk.Button(actions,text='Открыть папку',command=open_result_folder,state='disabled')
+    folder_button.pack(side='left',padx=3)
     ttk.Button(actions,text='Оформление',command=lambda:profile_dialog(root)).pack(side='left',padx=3)
     ttk.Button(actions,text='Обновления',command=lambda:show_updates(root,lambda:str(button.cget('state'))=='disabled')).pack(side='right')
     pane.columnconfigure(0, weight=1)
@@ -328,6 +326,7 @@ def show(process, create_document, initial=None):
                     else:
                         last_result.clear()
                         last_result.update(value)
+                        folder_button.configure(state='normal')
                         status.set(f"Готово. {value['pages']} стр., замечаний: {len(value['issues'])}.")
                         try:
                             os.startfile(str(Path(value["output"]) / "report.html"))
