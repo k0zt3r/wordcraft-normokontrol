@@ -28,3 +28,7 @@ report (*).json
 SKILL.md
 agents/
 normokontrol-backup-*/
+.normokontrol-settings.json
+.normokontrol-profile.json
+.normokontrol-update.json
+.normokontrol-result-*/

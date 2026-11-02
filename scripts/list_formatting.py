@@ -4,6 +4,7 @@ import re
 
 
 def normalize(model, para, heading, cache):
+    from format_profile import PROFILE
     from normokontrol import effective_para, MM, FONT
     effective = effective_para(model, para)
     ref = effective.get('numbering')
@@ -31,10 +32,10 @@ def normalize(model, para, heading, cache):
     cloned_num, cloned = cache[key]
     target = cloned['levels'][level_index]
     # Number starts at the paragraph indent; a space avoids wide tab stops.
-    indent = 0.0 if heading and effective.get('align') == 'center' else 10 * MM
+    indent = 0.0 if heading and effective.get('align') == 'center' else PROFILE['body_indent_mm'] * MM
     target.update(indent=indent, hanging=0.0, suffix='space', align='left')
     target.pop('tab', None)
-    target['chr'] = {'font': FONT, 'size': 14.0}
+    target['chr'] = {'font': FONT, 'size': PROFILE['text_size']}
     if level['format'] == 'bullet':
         target['text'] = '-'
     elif heading and level['format'] == 'decimal':

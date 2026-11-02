@@ -28,12 +28,13 @@ from zipfile import ZipFile
 import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from irgups_data import prepare_metadata, REG_NUMBER_RE
+from format_profile import PROFILE
 
-FONT = "Times New Roman"
-STAMP_FONT = "ISOCPEUR"
-STAMP_SIZE = 9
-STAMP_CODE_SIZE = 16
-FRAME_STROKE = 0.75  # Normokontrol.pdf §7.1.2, p.11.
+FONT = PROFILE['font']
+STAMP_FONT = PROFILE['stamp_font']
+STAMP_SIZE = PROFILE['stamp_size']
+STAMP_CODE_SIZE = PROFILE['stamp_code_size']
+FRAME_STROKE = PROFILE['frame_stroke_pt']
 MM = 72 / 25.4
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 SPECIAL = {"содержание", "введение", "заключение", "список использованных источников",
@@ -329,8 +330,8 @@ def normalize_model(model, mode, changes):
                 continue  # Preserve the user's deliberate title/page spacing.
             level = structure['levels'].get(i)
             props = block.setdefault("props", {})
-            font(block, 14)
-            props.update({"lineSpacing": {"rule": "multiple", "value": 1.5}, "widowControl": True})
+            font(block, PROFILE['text_size'])
+            props.update({"lineSpacing": {"rule": "multiple", "value": PROFILE['line_spacing']}, "widowControl": True})
             if not has_image(block):
                 props.update({'spaceBefore': 0.0, 'spaceAfter': 0.0,
                               'spaceBeforeAuto': False, 'spaceAfterAuto': False})
@@ -340,7 +341,7 @@ def normalize_model(model, mode, changes):
             if level:
                 props.update({"keepNext": True, "keepLines": True, "suppressHyphens": True})
                 # User profile: spacing only after chapters; subheadings flow into text.
-                props.update(spaceAfter=28.0 if level == 1 else 0.0,
+                props.update(spaceAfter=PROFILE['chapter_gap_pt'] if level == 1 else PROFILE['subheading_gap_pt'],
                              outlineLevel=level - 1)
                 if level > 1:
                     # Explicit False also overrides a page break inherited from Heading 1.
@@ -357,7 +358,7 @@ def normalize_model(model, mode, changes):
                 if match.group(1).casefold() == "таблица":
                     props["keepNext"] = True
             elif not has_image(block):
-                props.update({"align": "justify", "indentFirst": (10 if mode == "full" else 12.5) * MM,
+                props.update({"align": "justify", "indentFirst": PROFILE['body_indent_mm' if mode == 'full' else 'compact_indent_mm'] * MM,
                               "spaceAfter": 0.0})
                 if "\n" in block["text"] and re.search(
                         r"(?:^|\n)\s*(?:for |done\b|if |fi\b|sudo |[A-Za-z_][A-Za-z_0-9]*=|-\w)", block["text"]):
@@ -375,7 +376,7 @@ def normalize_model(model, mode, changes):
         elif block["kind"] == "table":
             caption = table_caption(body, i)
             data_table = caption is not None
-            size = 12 if data_table else 14
+            size = 12 if data_table else PROFILE['text_size']
             for ri, row in enumerate(block["rows"]):
                 rp = row.setdefault("props", {})
                 rp["cantSplit"] = True
@@ -387,11 +388,11 @@ def normalize_model(model, mode, changes):
                     for _, para in paragraphs(cell["blocks"]):
                         font(para, size)
                         pp = para.setdefault("props", {})
-                        pp["lineSpacing"] = {"rule": "multiple", "value": 1.0 if data_table else 1.5}
+                        pp["lineSpacing"] = {"rule": "multiple", "value": 1.0 if data_table else PROFILE['line_spacing']}
                         pp["spaceAfter"] = 0.0
                         if data_table:
                             pp["keepNext"] = mode == "full" and ri < len(block["rows"]) - 1
-            if i in detect_tocs(body) or (refs is not None and i > refs and not any(
+            if i in structure['toc'] or (refs is not None and i > refs and not any(
                     b["kind"] == "para" and re.fullmatch(r"приложение\s+[а-яa-z]", norm(b.get("text", "")))
                     for b in body[refs + 1:i])):
                 edges = {edge: {"style": "none", "width": 0.0} for edge in
@@ -1063,8 +1064,8 @@ def structural_checks(wc, model, mode, issues):
         main_text = len(path) == 1 and path[0] >= start
         if main_text and not has_image(para):
             spacing = effective_para(model, para).get("lineSpacing", {})
-            if spacing.get("rule") != "multiple" or abs(spacing.get("value", 0) - 1.5) > .01:
-                add_issue(issues, "line-spacing", f"Межстрочный интервал отличается от 1,5: {para['text'][:100]}")
+            if spacing.get("rule") != "multiple" or abs(spacing.get("value", 0) - PROFILE['line_spacing']) > .01:
+                add_issue(issues, "line-spacing", f"Межстрочный интервал отличается от {PROFILE['line_spacing']}: {para['text'][:100]}")
         for run, run_text in visible_text_runs(para):
             props = effective_char(model, para, run)
             if props.get("bold"):
@@ -1072,7 +1073,7 @@ def structural_checks(wc, model, mode, issues):
             if main_text or (len(path) > 1 and path[0] >= start):
                 if props.get("font") and props["font"] != FONT:
                     add_issue(issues, "font", f"Шрифт {props['font']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
-                allowed = (14,) if main_text else (12, 14)
+                allowed = (PROFILE['text_size'],) if main_text else (12, PROFILE['text_size'])
                 if props.get("size") and all(abs(props["size"] - size) > .1 for size in allowed):
                     add_issue(issues, "font-size", f"Кегль {props['size']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
 
@@ -1193,7 +1194,8 @@ a{{color:#1257a4}}small{{color:#596574}}</style>
 
 
 def process(source, out=None, mode="full", format_text=True, check_only=False, cli=None, progress=print, metadata=None,
-            toc_template=False, bibliography_template=False, toc_entries=None, bibliography_entries=None, optional_sections=None):
+            toc_template=False, bibliography_template=False, toc_entries=None, bibliography_entries=None, optional_sections=None,
+            created_from_template=False):
     metadata = prepare_metadata(metadata)
     source = Path(source).expanduser().resolve()
     if not source.is_file() or source.suffix.casefold() != ".docx":
@@ -1214,7 +1216,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
     for p in (docx_path, pdf_path, output / "report.html", output / "report.json"):
         if p.resolve() == source or p.exists():
             raise ValueError(f"Результат уже существует: {p}. Выберите другую папку.")
-    output.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     issues, changes = [], []
     if original["signed"]:
         add_issue(issues, "signature", "Исходный DOCX содержит цифровую подпись; изменённая копия не сохраняет её действительность.")
@@ -1287,7 +1289,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
                 if len(pdf) != pages:
                     raise RuntimeError("Число страниц PDF не совпадает с повторно открытым DOCX.")
                 for i, page in enumerate(pdf):
-                    if not page.get_text().strip() and not page.get_images():
+                    from pdf_checks import empty_body
+                    if empty_body(page):
                         add_issue(issues, "empty-page", "Возможно, пустая страница.", i + 1)
                     anchors=[s for b in page.get_text('dict')['blocks'] if 'lines' in b for line in b['lines'] for s in line['spans']
                              if s['text'].strip() in {'Изм.','Разраб.','Литера','Пров.'} and s['bbox'][1]>page.rect.height-45*MM]
@@ -1297,16 +1300,32 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             add_issue(issues, "pdf-inspection", "PyMuPDF не установлен: дополнительная проверка PDF пропущена.")
         if hashlib.sha256(source.read_bytes()).hexdigest() != before_hash:
             raise RuntimeError("Исходник изменился во время работы. Повторите запуск после сохранения файла.")
-        shutil.copyfile(temp / "result.docx", docx_path)
-        shutil.copyfile(temp / "result.pdf", pdf_path)
+        # Keep staged documents alive until the complete report is ready.
+        stage = Path(tempfile.mkdtemp(prefix='.normokontrol-result-',dir=output.parent))
+        try:
+            shutil.copyfile(temp / "result.docx", stage/docx_path.name)
+            shutil.copyfile(temp / "result.pdf", stage/pdf_path.name)
+        except BaseException:
+            from atomic_files import remove_stage
+            remove_stage(stage,output.parent)
+            raise
     report = {"input": str(source), "input_sha256": before_hash, "created": datetime.now().isoformat(timespec="seconds"),
               "mode": "Полный нормоконтроль" if mode == "full" else "Обычная учебная работа",
               "wordcraft": version, "pages": pages, "changes": changes, "issues": issues,
               "docx_name": docx_path.name, "pdf_name": pdf_path.name,
               "automated_only": True, "word_render_verified": False,
               "output": str(output), "check_only": check_only}
-    (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_report(output / "report.html", report)
+    report['format_profile'] = PROFILE
+    if created_from_template:
+        report.update(input='Новый документ из шаблона курсача',created_from_template=True)
+    try:
+        from atomic_files import publish, remove_stage
+        (stage / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_report(stage / "report.html", report)
+        publish(stage,output,[docx_path.name,pdf_path.name,'report.json','report.html'])
+    finally:
+        if stage.exists():
+            remove_stage(stage,output.parent)
     progress(f"Готово: {pages} стр., замечаний: {len(issues)}. {output}")
     return report
 
@@ -1318,13 +1337,7 @@ def create_document(out, **options):
         with Wordcraft(cli) as wc:
             wc.call("new_document", template="blank")
             wc.save(source)
-        report = process(source, out, **options)
-        report["input"] = "Новый документ из шаблона курсача"
-        report["created_from_template"] = True
-        folder = Path(report["output"])
-        (folder / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        write_report(folder / "report.html", report)
-        return report
+        return process(source, out, created_from_template=True, **options)
 
 
 def gui(initial=None):

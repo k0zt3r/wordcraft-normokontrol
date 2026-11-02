@@ -1,0 +1,26 @@
+{
+  "font": "Times New Roman",
+  "text_size": 14,
+  "line_spacing": 1.5,
+  "body_indent_mm": 10,
+  "compact_indent_mm": 12.5,
+  "chapter_gap_pt": 28,
+  "subheading_gap_pt": 0,
+  "stamp_font": "ISOCPEUR",
+  "stamp_size": 9,
+  "stamp_code_size": 16,
+  "frame_stroke_pt": 0.75,
+  "provenance": {
+    "font": "Положение §7.1.3",
+    "text_size": "Положение §7.1.3",
+    "line_spacing": "Положение §7.1.3",
+    "body_indent_mm": "Положение §7.1.4",
+    "frame_stroke_pt": "Положение §7.1.2",
+    "chapter_gap_pt": "Реализация двух интервалов приложения Е; 28 пт не указаны буквально",
+    "subheading_gap_pt": "Пользовательский образец, 02.11.2026",
+    "stamp_font": "Пользовательский образец",
+    "stamp_size": "Пользовательский образец",
+    "stamp_code_size": "Прямое указание пользователя, 02.11.2026",
+    "compact_indent_mm": "Профиль обычной учебной работы"
+  }
+}

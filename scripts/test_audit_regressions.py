@@ -57,6 +57,33 @@ class AuditTests(unittest.TestCase):
             nk.structural_checks(None,model,'compact',[])
             self.assertLess(scan.call_count,25)
 
+    def test_framed_blank_page_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            doc=Document();doc.add_heading('Введение',1);doc.add_paragraph('Body text.')
+            doc.add_page_break();doc.add_page_break();doc.add_paragraph('More text.')
+            source=root/'source.docx';doc.save(source)
+            report=nk.process(source,root/'out',progress=lambda _:None)
+            self.assertIn('empty-page',{i['code'] for i in report['issues']})
+
+    def test_bundle_rollback_on_existing_file(self):
+        from atomic_files import publish
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);stage=root/'stage';out=root/'out';stage.mkdir();out.mkdir()
+            (stage/'first').write_text('new');(stage/'second').write_text('new')
+            (out/'second').write_text('existing')
+            with self.assertRaises(FileExistsError):
+                publish(stage,out,['first','second'])
+            self.assertFalse((out/'first').exists())
+            self.assertEqual((out/'second').read_text(),'existing')
+
+    def test_profile_validation(self):
+        from format_profile import PROFILE,validate
+        for key,value in [('stamp_code_size',100),('text_size',float('nan')),('line_spacing',True)]:
+            data=dict(PROFILE);data[key]=value
+            with self.assertRaises(ValueError):
+                validate(data)
+
 
 if __name__=='__main__':
     unittest.main()

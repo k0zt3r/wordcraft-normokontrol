@@ -3,6 +3,7 @@ import re
 
 
 def check_rules(model, mode, issues):
+    from format_profile import PROFILE
     from structure import analyze
     structure = analyze(model)
     from normokontrol import (body_start, paragraphs, effective_para, effective_char,
@@ -25,10 +26,10 @@ def check_rules(model, mode, issues):
         props = effective_para(model, para)
         level = structure['levels'].get(path[0]) if len(path) == 1 else None
         if level:
-            if level == 1 and (props.get('spaceAfter') or 0) < 28 - .1:
+            if level == 1 and (props.get('spaceAfter') or 0) < PROFILE['chapter_gap_pt'] - .1:
                 add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')
             if level > 1:
-                if (props.get('spaceAfter') or 0) > .1:
+                if abs((props.get('spaceAfter') or 0) - PROFILE['subheading_gap_pt']) > .1:
                     add_issue(issues, 'subheading-spacing', f'По выбранному образцу после подзаголовка текст должен идти со следующей строки без дополнительного интервала: {text}')
                 if props.get('pageBreakBefore'):
                     add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}')
@@ -54,7 +55,7 @@ def check_rules(model, mode, issues):
             ordinary.append((path[0], text))
             # Commands, formulas and native numbering need their own layout rules.
             if not props.get('numbering') and not re.search(r'[\n\t{}=;]|https?://|^(?:sudo |for |if |def |class )', text):
-                expected = (10 if mode == 'full' else 12.5) * MM
+                expected = PROFILE['body_indent_mm' if mode == 'full' else 'compact_indent_mm'] * MM
                 if abs((props.get('indentFirst') or 0) - expected) > .5:
                     add_issue(issues, 'paragraph-indent', f'Абзацный отступ отличается от {10 if mode == "full" else 12.5} мм (§7.1.4): {text[:100]}')
         for run, visible in visible_text_runs(para):
