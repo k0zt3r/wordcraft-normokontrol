@@ -13,6 +13,26 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_list_abbreviation_dot_survives_wordcraft_roundtrip(self):
+        with tempfile.TemporaryDirectory(prefix='list-abbreviation-') as directory:
+            folder = Path(directory)
+            doc = Document()
+            doc.add_paragraph('Курсовая работа')
+            doc.add_paragraph('Иркутск 2026')
+            doc.add_heading('Введение', 1)
+            doc.add_paragraph('- действие и т.д.')
+            doc.add_paragraph('- другое действие')
+            source = folder / 'source.docx'
+            doc.save(source)
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            for check in (True, False):
+                report = nk.process(source, folder / str(check), check_only=check, progress=lambda _: None)
+                result = Document(Path(report['output']) / report['docx_name'])
+                items = [p.text for p in result.paragraphs if p.text.startswith('- ')]
+                self.assertEqual(items, ['- действие и т.д.', '- другое действие'] if check
+                                 else ['- действие и т.д.;', '- другое действие.'])
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
+
     def test_dotted_subheadings_wordcraft_roundtrip(self):
         with tempfile.TemporaryDirectory(prefix='subheading-test-') as directory:
             folder = Path(directory)

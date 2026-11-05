@@ -1,4 +1,4 @@
-"""Read-only list diagnostics; ambiguous hierarchy never changes author text."""
+"""Per-item list formatting and read-only diagnostics of ambiguous hierarchy."""
 import re
 
 MARKER = re.compile(r'^\s*(?:[-–—]\s+|\d+[.)]\s+|[а-яё]\)\s+)', re.I)
@@ -76,7 +76,7 @@ def _terminal_edit(para, start, end, ending):
 
 
 def format_simple(model, changes, issues, check_only=False):
-    """Apply terminal ;/. only to a whole, explicitly introduced simple list."""
+    """Format explicit items independently; preserve levels and protected objects."""
     from normokontrol import body_start, auto_toc_text, norm
     from structure import analyze
     if check_only:
@@ -109,8 +109,8 @@ def format_simple(model, changes, issues, check_only=False):
         introduced = (intro.get('kind') == 'para' and first - 1 not in excluded
                       and not _list_entry(model, intro) and not intro.get('fields')
                       and not intro.get('objects') and intro.get('text', '').rstrip().endswith(':'))
-        # Do not turn one side of a mixed-ID/marker list into an independent
-        # simple group, and never look backwards across a blank paragraph.
+        # Native metadata and repeated dashes identify a list without an intro.
+        # Other manual markers require an immediately preceding introduction.
         explicit = dash_list or all(entry[0][0] == 'native' for _, entry in cluster)
         if not explicit and not introduced:
             continue
@@ -133,7 +133,9 @@ def format_simple(model, changes, issues, check_only=False):
             following = next((entry for _, entry in cluster[order + 1:] if entry[1] <= depth), None)
             ending = ';' if following else '.'
             if end and text[end - 1] != ':' and text[end - 1] != ending:
-                begin = end - 1 if text[end - 1] in ';.' else end
+                abbreviation = re.search(r'\b(?:[А-ЯЁа-яё]\.\s*){2,}$', text[:end])
+                keep_dot = ending == ';' and text[end - 1] == '.' and abbreviation
+                begin = end - 1 if text[end - 1] in ';.' and not keep_dot else end
                 updated = _terminal_edit(p, begin, end, ending)
                 if updated is None:
                     continue

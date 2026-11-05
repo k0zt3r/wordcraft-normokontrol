@@ -37,34 +37,62 @@ class SimpleListTests(unittest.TestCase):
         self.assertEqual(doc,before)
         self.assertEqual((changes,issues),([],[]))
 
-    def test_entire_ambiguous_clusters_are_unchanged(self):
-        cases=[
-            [item('Первое. Второе предложение.'),item('второй пункт;')],
-            [item('родитель:'),item('возможный подпункт.')],
-            [item('первый пункт'),item('вложенный пункт',depth=1)],
-            [item('первый пункт'),dict(item('второй пункт'),fields=[{'instr':'REF'}])],
-            [item('первый пункт'),dict(item('второй пункт'),objects=[{'type':'image'}])],
-            [item('первый пункт'),dict(item('второй пункт'),runs=[{'len':1}])],
-            [item('вопрос?'),item('второй пункт')],
-            [item('цитата «текст»'),item('второй пункт')],
-            [item('закончено...'),item('второй пункт')],
-            [item('действие и т.д.'),item('второй пункт')],
+    def test_items_are_formatted_independently_without_changing_structure(self):
+        cases = [
+            ([item('Первое. Второе предложение.'), item('второй пункт;')],
+             ['Первое. Второе предложение;', 'второй пункт.'], ()),
+            ([item('родитель:'), item('возможный подпункт.')],
+             ['родитель:', 'возможный подпункт.'], (0,)),
+            ([item('первый пункт'), item('вложенный пункт', depth=1)],
+             ['первый пункт.', 'вложенный пункт.'], ()),
+            ([item('первый пункт'), dict(item('второй пункт'), fields=[{'instr': 'REF'}])],
+             ['первый пункт;', 'второй пункт'], (1,)),
+            ([item('первый пункт'), dict(item('второй пункт'), objects=[{'type': 'image'}])],
+             ['первый пункт;', 'второй пункт'], (1,)),
+            ([item('первый пункт'), dict(item('второй пункт'), runs=[{'len': 1}])],
+             ['первый пункт;', 'второй пункт'], (1,)),
+            ([item('вопрос?'), item('второй пункт')], ['вопрос?', 'второй пункт.'], (0,)),
+            ([item('цитата «текст»'), item('второй пункт')], ['цитата «текст»', 'второй пункт.'], (0,)),
+            ([item('закончено...'), item('второй пункт')], ['закончено...', 'второй пункт.'], (0,)),
+            ([item('действие и т.д.'), item('второй пункт')], ['действие и т.д.;', 'второй пункт.'], ()),
         ]
-        for entries in cases:
-            with self.subTest(entries=entries):
-                doc=self.simple(entries);before=copy.deepcopy(doc);changes=[]
-                format_simple(doc,changes,[])
-                self.assertEqual(doc,before)
-                self.assertEqual(changes,[])
+        for entries, expected, protected in cases:
+            with self.subTest(expected=expected):
+                doc = self.simple(entries)
+                before = copy.deepcopy(doc)
+                changes = []
+                format_simple(doc, changes, [])
+                self.assertEqual([x['text'] for x in doc['body'][2:]], expected)
+                self.assertEqual(doc['numbering'], before['numbering'])
+                self.assertEqual(doc['body'][:2], before['body'][:2])
+                for old, updated in zip(before['body'][2:], doc['body'][2:]):
+                    self.assertEqual(old['props'], updated['props'])
+                for index in protected:
+                    self.assertEqual(doc['body'][index + 2], before['body'][index + 2])
+                fixed = copy.deepcopy(doc)
+                change_count = len(changes)
+                format_simple(doc, changes, [])
+                self.assertEqual(doc, fixed)
+                self.assertEqual(len(changes), change_count)
 
-    def test_no_colon_blank_or_neighboring_other_list_id(self):
-        docs=[model([item('первый'),item('второй')]),
-              model([p('Выполните:'),p(''),item('первый'),item('второй')]),
-              model([item('предыдущий:',num=25),item('первый'),item('второй')]),
-              self.simple([item('первый'),item('второй'),item('другая группа',num=25)])]
-        for doc in docs:
-            before=copy.deepcopy(doc);format_simple(doc,[],[])
-            self.assertEqual(doc,before)
+    def test_native_lists_do_not_require_colon_or_merge_neighboring_ids(self):
+        cases = [
+            (model([item('первый'), item('второй')]), ['первый;', 'второй.']),
+            (model([p('Выполните:'), p(''), item('первый'), item('второй')]),
+             ['Выполните:', '', 'первый;', 'второй.']),
+            (model([item('предыдущий:', num=25), item('первый'), item('второй')]),
+             ['предыдущий:', 'первый;', 'второй.']),
+            (self.simple([item('первый'), item('второй'), item('другая группа', num=25)]),
+             ['Необходимо выполнить:', 'первый;', 'второй.', 'другая группа']),
+        ]
+        for doc, expected in cases:
+            with self.subTest(expected=expected):
+                before = copy.deepcopy(doc)
+                format_simple(doc, [], [])
+                self.assertEqual([x['text'] for x in doc['body'][1:]], expected)
+                self.assertEqual(doc['numbering'], before['numbering'])
+                for old, updated in zip(before['body'], doc['body']):
+                    self.assertEqual(old['props'], updated['props'])
 
     def test_run_formatting_and_bookmark_position_are_retained(self):
         first=item('первый пункт\ufffc')
@@ -78,11 +106,18 @@ class SimpleListTests(unittest.TestCase):
         self.assertEqual(updated['runs'][0],first['runs'][0])
         self.assertEqual(updated['objects'][0]['off'],len('первый пункт;'.encode()))
 
-    def test_table_heading_and_generated_contents_are_boundaries(self):
-        for separator in ({'kind':'table','rows':[]},p('Заключение'),p('Приложение А')):
-            doc=model([p('Выполните:'),separator,item('первый'),item('второй')])
-            before=copy.deepcopy(doc);format_simple(doc,[],[])
-            self.assertEqual(doc,before)
+    def test_boundaries_do_not_block_following_explicit_lists_or_edit_contents(self):
+        for separator in ({'kind': 'table', 'rows': []}, p('Заключение')):
+            doc = model([p('Выполните:'), separator, item('первый'), item('второй')])
+            before = copy.deepcopy(doc)
+            format_simple(doc, [], [])
+            self.assertEqual(doc['body'][:3], before['body'][:3])
+            self.assertEqual([x['text'] for x in doc['body'][3:]], ['первый;', 'второй.'])
+        for heading in ('Приложение А', 'Список литературы', 'Список использованных источников'):
+            doc = model([p('Выполните:'), p(heading), item('первый'), item('второй')])
+            before = copy.deepcopy(doc)
+            format_simple(doc, [], [])
+            self.assertEqual(doc, before)
         begin=dict(p('\ufffc'),objects=[{'type':'fieldStart','instr':'TOC'}])
         end=dict(p('\ufffc'),objects=[{'type':'fieldEnd'}])
         doc=model([p('Содержание'),begin,p('Выполните:'),item('первый'),item('второй'),end])
