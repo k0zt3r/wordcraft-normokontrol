@@ -34,7 +34,51 @@ class ClipboardTests(unittest.TestCase):
             self.assertTrue(any(w.winfo_class()=='Canvas' for w in widgets))
         finally:
             for root in roots:
+                for job in root.tk.splitlist(root.tk.call('after', 'info')):
+                    root.after_cancel(job)
                 root.destroy()
+
+    def test_window_fits_2k_screen_at_common_dpi_scales(self):
+        from unittest.mock import patch
+        import normokontrol_gui as gui
+        original = tk.Tk
+        for scale in (1.0, 1.25, 1.5, 2.0):
+            with self.subTest(scale=scale):
+                roots = []
+                def create():
+                    root = original()
+                    root.withdraw()
+                    root.tk.call('tk', 'scaling', 96 * scale / 72)
+                    root.winfo_fpixels = lambda unit: 96 * scale
+                    root.winfo_screenwidth = lambda: 2560
+                    root.winfo_screenheight = lambda: 1440
+                    root.mainloop = lambda: None
+                    roots.append(root)
+                    return root
+                try:
+                    with patch.object(gui.tk, 'Tk', create):
+                        gui.show(None, None)
+                    root = roots[0]
+                    root.deiconify()
+                    root.update()
+                    self.assertLessEqual(root.winfo_width(), 2560)
+                    self.assertLessEqual(root.winfo_height(), 1440)
+                    self.assertLessEqual(root.minsize()[0], root.winfo_width())
+                    self.assertLessEqual(root.minsize()[1], root.winfo_height())
+                    def visit(widget):
+                        yield widget
+                        for child in widget.winfo_children():
+                            yield from visit(child)
+                    run = next(w for w in visit(root) if w.winfo_class() == 'TButton'
+                               and w.cget('text').startswith('Выполнить'))
+                    self.assertGreater(run.winfo_height(), 0)
+                    self.assertLessEqual(run.winfo_rooty() + run.winfo_height(),
+                                         root.winfo_rooty() + root.winfo_height())
+                finally:
+                    for root in roots:
+                        for job in root.tk.splitlist(root.tk.call('after', 'info')):
+                            root.after_cancel(job)
+                        root.destroy()
 
     def test_clipboard_entry_and_multiline(self):
         root = tk.Tk()

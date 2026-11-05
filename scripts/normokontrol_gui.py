@@ -8,6 +8,59 @@ from tkinter import filedialog, messagebox, ttk
 from irgups_data import UNIVERSITY_FULL, UNIVERSITY_SHORT, DIRECTORY, WORK_TYPES, DOCUMENT_CODES, unit_code, generate_number
 
 
+def enable_dpi_awareness():
+    """Disable Windows bitmap stretching before Tk creates its first window.
+
+    Tk 8.6 uses one font scale per interpreter, so use system DPI awareness,
+    rather than claiming per-monitor support that the UI cannot implement.
+    """
+    if os.name != 'nt':
+        return
+    import ctypes
+    try:
+        # PROCESS_SYSTEM_DPI_AWARE; available since Windows 8.1.
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            pass
+
+
+def fit_window(root, scale):
+    """Keep the requested size and minimum inside the usable screen area."""
+    available_w = max(1, root.winfo_screenwidth() - round(40 * scale))
+    available_h = max(1, root.winfo_screenheight() - round(100 * scale))
+    root.update_idletasks()
+    width = min(available_w, max(round(980 * scale), root.winfo_reqwidth()))
+    height = min(available_h, max(round(800 * scale), root.winfo_reqheight()))
+    root.minsize(min(round(920 * scale), available_w),
+                 min(round(600 * scale), available_h))
+    root.geometry(f'{width}x{height}')
+
+
+def scale_spacing(root, scale):
+    """Scale pixel spacing once; font and character-based sizes belong to Tk."""
+    def distance(value):
+        return round(float(value) * scale)
+
+    def distances(value):
+        return tuple(distance(v) for v in (value if isinstance(value, (tuple, list)) else root.tk.splitlist(str(value))))
+
+    def visit(widget):
+        for option in ('padding', 'padx', 'pady'):
+            if option in widget.keys():
+                widget.configure(**{option: distances(widget.cget(option))})
+        for manager in ('grid', 'pack'):
+            if widget.winfo_manager() == manager:
+                info = getattr(widget, manager + '_info')()
+                values = {k: distances(info[k]) for k in ('padx', 'pady', 'ipadx', 'ipady') if k in info}
+                getattr(widget, manager + '_configure')(**values)
+        for child in widget.winfo_children():
+            visit(child)
+    visit(root)
+
+
 def install_edit_shortcuts(root):
     """Windows keycodes stay stable when the active keyboard layout is Russian."""
     actions = {65: '<<SelectAll>>', 67: '<<Copy>>', 86: '<<Paste>>', 88: '<<Cut>>', 90: '<<Undo>>'}
@@ -60,16 +113,17 @@ def show(process, create_document, initial=None):
     from preferences import load as load_preferences, save as save_preferences, profile_dialog
     from runtime import ProcessingCancelled
     saved=load_preferences()
+    enable_dpi_awareness()
     root = tk.Tk()
+    scale = root.winfo_fpixels('1i') / 96.0
+    px = lambda value: round(value * scale)
     root.title("Нормоконтроль ИрГУПС · Wordcraft")
-    root.geometry("980x800")
-    root.minsize(920, 740)
     root.option_add("*Font", "{Segoe UI} 10")
     style = ttk.Style(root)
     if 'vista' in style.theme_names():
         style.theme_use('vista')
-    style.configure('TButton', padding=(12, 7))
-    style.configure('TNotebook.Tab', padding=(14, 8))
+    style.configure('TButton', padding=(px(12), px(7)))
+    style.configure('TNotebook.Tab', padding=(px(14), px(8)))
     style.configure('Title.TLabel', font=('Segoe UI', 17, 'bold'))
     pane = ttk.Frame(root, padding=20)
     pane.pack(fill="both", expand=True)
@@ -125,7 +179,7 @@ def show(process, create_document, initial=None):
     notebook.add(ref_tab, text="Список литературы")
     # The title form is taller than a typical laptop window; keep it scrollable.
     title_shell=title_tab
-    canvas=tk.Canvas(title_shell,height=400,width=850,highlightthickness=0)
+    canvas=tk.Canvas(title_shell,height=px(320),width=px(850),highlightthickness=0)
     scroll=ttk.Scrollbar(title_shell,orient='vertical',command=canvas.yview)
     canvas.configure(yscrollcommand=scroll.set)
     scroll.pack(side='right',fill='y')
@@ -337,8 +391,16 @@ def show(process, create_document, initial=None):
         root.after(150, poll)
     root.after(150, poll)
     install_edit_shortcuts(root)
-    root.update_idletasks()
-    available=max(600,root.winfo_screenheight()-80)
-    root.minsize(920,min(740,available))
-    root.geometry(f"{max(980,root.winfo_reqwidth())}x{min(available,max(800,root.winfo_reqheight()))}")
+    scale_spacing(root, scale)
+    # Labels follow the actual container width instead of forcing a wide window.
+    def wrap_labels(event):
+        def visit(widget):
+            if widget.winfo_class() == 'TLabel' and int(float(widget.cget('wraplength') or 0)):
+                parent_width = widget.master.winfo_width()
+                widget.configure(wraplength=max(px(160), parent_width - px(36)))
+            for child in widget.winfo_children():
+                visit(child)
+        visit(pane)
+    pane.bind('<Configure>', wrap_labels, add='+')
+    fit_window(root, scale)
     root.mainloop()
