@@ -3,6 +3,8 @@
 
 Без аргументов — окно выбора файла. CLI: normokontrol.py input.docx --out DIR.
 Не требует Codex, Word COM, сервера MCP или подключения к сети.
+Интерфейс агентов: python normokontrol.py --agent get_capabilities
+MCP stdio: python normokontrol.py --mcp (корневой запускатель).
 """
 from __future__ import annotations
 

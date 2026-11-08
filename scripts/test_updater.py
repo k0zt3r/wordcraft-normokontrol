@@ -1,6 +1,9 @@
 import io
+import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from zipfile import ZipFile
 from unittest.mock import patch
@@ -8,6 +11,28 @@ import updater
 
 
 class UpdateTests(unittest.TestCase):
+    def test_actual_agent_interface_survives_zip_install(self):
+        stream = io.BytesIO()
+        current = (updater.ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+        with ZipFile(stream, 'w') as archive:
+            for name in updater.REQUIRED:
+                archive.writestr('project/' + name, (updater.ROOT / name).read_bytes())
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'requirements.txt').write_bytes((updater.ROOT / 'requirements.txt').read_bytes())
+            updater.install_archive(stream.getvalue(), current, root)
+            for name in ('AGENTS.md', 'references/agent-interface.md',
+                         'scripts/agent_api.py', 'scripts/agent_mcp.py'):
+                self.assertTrue((root / name).is_file(), name)
+            reply = subprocess.run([sys.executable, str(root / 'normokontrol.py'),
+                                    '--agent', 'get_capabilities'], cwd=updater.ROOT.parent,
+                                   capture_output=True, text=True, encoding='utf-8', timeout=20)
+            self.assertEqual(reply.returncode, 0, reply.stderr)
+            result = json.loads(reply.stdout)
+            self.assertTrue(result['ok'])
+            self.assertEqual(result['data']['version'], current)
+            self.assertEqual(len(result['data']['tools']), 7)
+
     def test_commit_failure_restores_old_files(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)

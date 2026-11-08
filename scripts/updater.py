@@ -12,7 +12,8 @@ from zipfile import ZipFile
 
 REPO = 'k0zt3r/wordcraft-normokontrol'
 ROOT = Path(__file__).resolve().parent.parent
-REQUIRED = ('VERSION','run.cmd','normokontrol.py','_normokontrol_recovery.py','requirements.txt',
+REQUIRED = ('VERSION','run.cmd','normokontrol.py','_normokontrol_recovery.py','requirements.txt','AGENTS.md',
+            'references/agent-interface.md','scripts/agent_api.py','scripts/agent_mcp.py',
             'Normokontrol.pdf','references/norm-source/requirements.json',
             'references/norm-source/source.json','references/norm-source/clauses.json',
             'references/norm-source/full-text.md',
@@ -62,7 +63,7 @@ def install_archive(payload, expected_version, root):
     if (root/'.normokontrol-update.json').exists():
         raise ValueError('Предыдущее обновление не завершено. Перезапустите программу для восстановления.')
     allowed = {'VERSION', 'normokontrol.py', 'run.cmd', 'requirements.txt',
-               'requirements-dev.txt', 'README.md', 'LICENSE', 'Normokontrol.pdf', '_normokontrol_recovery.py'}
+               'requirements-dev.txt', 'README.md', 'AGENTS.md', 'LICENSE', 'Normokontrol.pdf', '_normokontrol_recovery.py'}
     files = {}
     with ZipFile(io.BytesIO(payload)) as archive:
         if sum(i.file_size for i in archive.infolist()) > 60 * 1024 * 1024:

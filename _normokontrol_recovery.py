@@ -6,7 +6,7 @@ import shutil
 import tempfile
 
 JOURNAL = '.normokontrol-update.json'
-ROOT_FILES = {'VERSION','README.md','LICENSE','Normokontrol.pdf','normokontrol.py','run.cmd',
+ROOT_FILES = {'VERSION','README.md','AGENTS.md','LICENSE','Normokontrol.pdf','normokontrol.py','run.cmd',
               'requirements.txt','requirements-dev.txt','_normokontrol_recovery.py'}
 
 
