@@ -1,0 +1,21 @@
+{
+  "python": {
+    "version": "3.12.16",
+    "filename": "cpython-3.12.16+20261026-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    "sha256": "1f2ab53880fc67ea323398c6388e05af28addc99a8e389209f08a51fdff4b149"
+  },
+  "wordcraft": {
+    "version": "0.16.0",
+    "filename": "wordcraft-0.16.0-windows-x64-portable.zip",
+    "url": "https://github.com/storytold/wordcraft/releases/download/v0.16.0/wordcraft-0.16.0-windows-x64-portable.zip",
+    "sha256": "aab5bfc4b5ce63c1bb1036ea2ab68aa1dbb300d8936de948c29739b15b3118e3"
+  },
+  "inno": {
+    "version": "6.7.4",
+    "filename": "innosetup-6.7.4.exe",
+    "url": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe",
+    "sha256": "a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c"
+  },
+  "packages": ["PyMuPDF==2.0"]
+}

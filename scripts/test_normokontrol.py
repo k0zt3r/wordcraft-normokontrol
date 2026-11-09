@@ -325,7 +325,9 @@ class NormokontrolTests(unittest.TestCase):
                     stamp_top=bottom-(40 if big else 15)*nk.MM
                     stamp_spans=[s for b in page.get_text('dict')['blocks'] if 'lines' in b for l in b['lines'] for s in l['spans'] if s['bbox'][1]>=stamp_top-.1]
                     self.assertTrue(stamp_spans)
-                    self.assertTrue(all('ISOCPEUR' in s['font'].upper() and abs(s['size']-9)<.01 for s in stamp_spans))
+                    expected_font = nk.STAMP_FONT.replace(' ', '').upper()
+                    self.assertTrue(all(expected_font in s['font'].replace(' ', '').upper()
+                                        and abs(s['size']-nk.STAMP_SIZE)<.01 for s in stamp_spans))
                     if big:
                         def vertical(x,y0,y1):
                             return any(abs(d['rect'].x0-x)<.02 and abs(d['rect'].x1-x)<.02 and

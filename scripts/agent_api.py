@@ -113,41 +113,69 @@ def _validate(value, schema, path='arguments'):
             _validate(item, schema['items'], f'{path}[{index}]')
 
 
-def _font_check():
+def _font_check(font_name='Times New Roman'):
     if os.name != 'nt':
-        return {'ok': False, 'detail': 'Автоматическое обнаружение ISOCPEUR доступно только в Windows; нужна ручная проверка.'}
+        return {'ok': False, 'family': font_name,
+                'detail': f'Автоматическое обнаружение {font_name} доступно только в Windows; нужна ручная проверка.'}
     import winreg
-    fonts = []
+    import pymupdf
+    family = ''.join(c for c in font_name.casefold() if c.isalnum())
+    fonts, seen = [], set()
+    folders = [Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts']
+    if os.environ.get('LOCALAPPDATA'):
+        folders.append(Path(os.environ['LOCALAPPDATA']) / 'Microsoft/Windows/Fonts')
+
+    def inspect(path):
+        path = Path(path)
+        if path in seen or not path.is_file():
+            return
+        seen.add(path)
+        try:
+            font = pymupdf.Font(fontfile=str(path))
+            name = ''.join(c for c in font.name.casefold() if c.isalnum())
+            if family in name:
+                fonts.append({'name': font.name, 'file': str(path)})
+        except Exception:
+            return
+
     for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         try:
             with winreg.OpenKey(hive, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts') as key:
                 for index in range(winreg.QueryInfoKey(key)[1]):
                     name, value, _ = winreg.EnumValue(key, index)
-                    if 'isocpeur' in name.casefold():
-                        fonts.append({'name': name, 'file': value})
+                    if family in ''.join(c for c in name.casefold() if c.isalnum()):
+                        path = Path(value)
+                        if path.is_absolute():
+                            inspect(path)
+                        else:
+                            for folder in folders:
+                                inspect(folder / path)
         except OSError:
             continue
     # Per-user fonts can be present without readable registry entries (including
     # restricted agent sessions). Inspect their embedded family, not filenames.
-    import pymupdf
-    folders = [Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts']
-    if os.environ.get('LOCALAPPDATA'):
-        folders.append(Path(os.environ['LOCALAPPDATA']) / 'Microsoft/Windows/Fonts')
+    # Standard family filenames avoid scanning every installed font in the
+    # ordinary case. Custom profiles still work with arbitrary font filenames.
+    prefix = {'timesnewroman': 'times', 'isocpeur': 'iso'}.get(family, '')
     for folder in folders:
-        for path in folder.glob('iso*.ttf'):
-            try:
-                font = pymupdf.Font(fontfile=str(path))
-                if 'isocpeur' in font.name.casefold():
-                    fonts.append({'name': font.name, 'file': str(path)})
-            except Exception:
-                continue
-    regular = any('italic' not in f['name'].casefold() for f in fonts)
-    italic = any('italic' in f['name'].casefold() for f in fonts)
-    return {'ok': regular and italic, 'detail': 'Нужны ISOCPEUR Regular и Italic; фактическая подстановка дополнительно проверяется в PDF.', 'fonts': fonts}
+        for pattern in (prefix + '*.ttf', prefix + '*.otf'):
+            for path in folder.glob(pattern):
+                inspect(path)
+    regular = any(not any(style in f['name'].casefold() for style in ('italic', 'bold')) for f in fonts)
+    italic = any('italic' in f['name'].casefold() and 'bold' not in f['name'].casefold() for f in fonts)
+    return {'ok': regular and italic, 'family': font_name,
+            'detail': f'Нужны {font_name} Regular и Italic из выбранного профиля; фактическая подстановка дополнительно проверяется в PDF.',
+            'fonts': fonts}
 
 
 def doctor(wordcraft=None):
     checks = {'python': {'ok': sys.version_info >= (3, 11), 'version': sys.version.split()[0], 'executable': sys.executable}}
+    try:
+        import tkinter
+        interpreter = tkinter.Tcl()
+        checks['tkinter'] = {'ok': True, 'tcl': interpreter.eval('info patchlevel'), 'tk': tkinter.TkVersion}
+    except Exception as error:
+        checks['tkinter'] = {'ok': False, 'detail': str(error), 'remedy': 'Восстановите Python с Tcl/Tk или переустановите приложение полным установщиком.'}
     try:
         pdf = importlib.import_module('pymupdf')
         checks['pymupdf'] = {'ok': True, 'version': getattr(pdf, 'VersionBind', 'unknown')}
@@ -174,7 +202,7 @@ def doctor(wordcraft=None):
     except Exception as error:
         checks['wordcraft'] = {'ok': False, 'detail': str(error), 'remedy': 'Установите Wordcraft с wordcraft-cli.exe или передайте wordcraft.'}
     try:
-        checks['stamp_fonts'] = _font_check()
+        checks['stamp_fonts'] = _font_check(engine.PROFILE['stamp_font'] if engine is not None else 'Times New Roman')
     except Exception as error:
         checks['stamp_fonts'] = {'ok': False, 'detail': str(error)}
     return {'ready': all(item['ok'] for item in checks.values()), 'checks': checks}

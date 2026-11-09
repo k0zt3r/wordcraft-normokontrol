@@ -1,9 +1,13 @@
 @echo off
 setlocal
+if exist "%~dp0runtime\pythonw.exe" goto runtime
 if exist "%~dp0.venv\Scripts\pythonw.exe" goto venv
 where pythonw.exe >nul 2>nul
 if errorlevel 1 goto console
 start "" pythonw.exe "%~dp0normokontrol.py" --gui %*
+exit /b
+:runtime
+start "" "%~dp0runtime\pythonw.exe" -E -s "%~dp0normokontrol.py" --gui %*
 exit /b
 :venv
 start "" "%~dp0.venv\Scripts\pythonw.exe" "%~dp0normokontrol.py" --gui %*

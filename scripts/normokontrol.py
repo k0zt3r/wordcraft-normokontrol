@@ -57,7 +57,16 @@ def byte_len(text):
 
 
 def find_cli(explicit=None):
-    candidates = [explicit, os.getenv("WORDCRAFT_CLI"), shutil.which("wordcraft-cli")]
+    root = Path(__file__).resolve().parent.parent
+    configured = None
+    try:
+        configured = json.loads((root / '.normokontrol-dependencies.json').read_text(encoding='utf-8')).get('wordcraft_cli')
+    except (OSError, ValueError, AttributeError):
+        pass
+    candidates = [explicit, os.getenv("WORDCRAFT_CLI"), configured,
+                  str(root / 'wordcraft/wordcraft-cli.exe'),
+                  *(str(path) for path in sorted((root / 'wordcraft').glob('*/wordcraft-cli.exe'))),
+                  shutil.which("wordcraft-cli")]
     for base in (os.getenv("ProgramFiles"), os.getenv("LOCALAPPDATA")):
         if base:
             candidates.extend([str(Path(base) / "ArtCraft/WordCraft/wordcraft-cli.exe"),

@@ -3,7 +3,7 @@ from pathlib import Path
 import runpy
 import sys
 
-if __name__ == "__main__":
+def main():
     recovery = runpy.run_path(str(Path(__file__).resolve().parent / '_normokontrol_recovery.py'))
     recovery['recover'](Path(__file__).resolve().parent)
     if '--mcp' in sys.argv[1:]:
@@ -25,3 +25,14 @@ if __name__ == "__main__":
             sys.stderr.reconfigure(encoding='utf-8')
         raise SystemExit(cli_main())
     runpy.run_path(str(Path(__file__).resolve().parent / "scripts" / "normokontrol.py"), run_name="__main__")
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        if not sys.argv[1:] or '--gui' in sys.argv[1:]:
+            from scripts.startup_errors import show_startup_error
+            show_startup_error(error, Path(__file__).resolve().parent)
+            raise SystemExit(1)
+        raise

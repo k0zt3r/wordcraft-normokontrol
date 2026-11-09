@@ -1,0 +1,95 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache verified downloads
+        uses: actions/cache@v4
+        with:
+          path: build/downloads
+          key: windows-x64-installer-${{ hashFiles('installer/dependencies.json', 'installer/requirements-lock.txt') }}
+
+      - name: Build installer and cache Wordcraft for smoke test
+        run: python installer/build.py --download-wordcraft
+
+      - name: Install into a separate test directory
+        run: |
+          $setup = Get-ChildItem -LiteralPath dist -Filter '*-windows-x64-setup.exe' |
+            Select-Object -First 1
+          if (-not $setup) { throw 'Installer was not produced.' }
+          $archive = Get-ChildItem -LiteralPath build/downloads -Filter 'wordcraft-*-windows-x64-portable.zip' |
+            Select-Object -First 1
+          if (-not $archive) { throw 'Wordcraft archive is absent from the build cache.' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'NormokontrolSmoke'
+          $setupLog = Join-Path $env:RUNNER_TEMP 'normokontrol-install.log'
+          $installerArguments = @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
+            "/DIR=`"$installDir`"",
+            "/WORDCRAFTARCHIVE=`"$($archive.FullName)`"",
+            "/LOG=`"$setupLog`""
+          )
+          $process = Start-Process -FilePath $setup.FullName -ArgumentList $installerArguments `
+            -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          "NORMOKONTROL_SMOKE_DIR=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Check installed dependencies and Tcl/Tk
+        run: |
+          $runtime = Join-Path $env:NORMOKONTROL_SMOKE_DIR 'runtime/python.exe'
+          $launcher = Join-Path $env:NORMOKONTROL_SMOKE_DIR 'normokontrol.py'
+          $doctorText = & $runtime $launcher --agent doctor
+          if ($LASTEXITCODE -ne 0) { throw 'Installed doctor command failed.' }
+          $doctorText | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'normokontrol-doctor.json') -Encoding utf8
+          $doctor = $doctorText | ConvertFrom-Json
+          if (-not $doctor.ok -or -not $doctor.data.ready) { throw 'Installed environment is not ready.' }
+          & $runtime -I -c "import tkinter; root=tkinter.Tk(); root.withdraw(); root.update_idletasks(); root.destroy()"
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled Tcl/Tk cannot create a window.' }
+
+      - name: Create a document through the installed Wordcraft runtime
+        run: |
+          $runtime = Join-Path $env:NORMOKONTROL_SMOKE_DIR 'runtime/python.exe'
+          $launcher = Join-Path $env:NORMOKONTROL_SMOKE_DIR 'normokontrol.py'
+          $requestFile = Join-Path $env:RUNNER_TEMP 'normokontrol-create-request.json'
+          @{
+            out = (Join-Path $env:RUNNER_TEMP 'NormokontrolCreatedDocument')
+            metadata = @{ title = 'Installer smoke test' }
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $requestFile -Encoding utf8
+          $resultText = & $runtime $launcher --agent create_document --request $requestFile
+          if ($LASTEXITCODE -ne 0) { throw 'Installed document creation failed.' }
+          $resultText | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'normokontrol-create-result.json') -Encoding utf8
+          $result = $resultText | ConvertFrom-Json
+          if (-not $result.ok) { throw 'Installed document creation returned an error.' }
+          foreach ($path in @($result.data.artifacts.docx, $result.data.artifacts.pdf, $result.data.artifacts.report_json)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing document artifact: $path" }
+          }
+
+      - name: Upload installer and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: normokontrol-windows-x64
+          if-no-files-found: warn
+          path: |
+            dist/*-windows-x64-setup.exe
+            dist/*-windows-x64-setup.exe.sha256
+            ${{ runner.temp }}/normokontrol-install.log
+            ${{ runner.temp }}/normokontrol-doctor.json
+            ${{ runner.temp }}/normokontrol-create-result.json
+            ${{ runner.temp }}/NormokontrolSmoke/install-report.json

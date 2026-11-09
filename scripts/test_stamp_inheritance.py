@@ -1,6 +1,7 @@
 """Rendered regression for stamp labels inheriting body paragraph indents."""
 from pathlib import Path
 import hashlib
+import re
 import tempfile
 import unittest
 
@@ -40,12 +41,25 @@ class StampInheritanceTests(unittest.TestCase):
                     region = pymupdf.Rect(0, page.rect.height - 45 * nk.MM,
                                            page.rect.width, page.rect.height)
                     lines = page.get_text(clip=region).splitlines()
+                    text = ' '.join(lines)
                     for label in ('Изм.', 'Лист', '№ докум.', 'Подпись', 'Дата'):
-                        self.assertIn(label, lines, (index + 1, lines))
+                        # PDF extraction can merge adjacent cells onto one line
+                        # with Times New Roman; still require each complete label.
+                        self.assertRegex(text, r'(?<!\S)' + re.escape(label) + r'(?!\S)', (index + 1, lines))
                     if index == 1:
                         for label in ('Разраб.', 'Пров.', 'Н.контр.', 'Утв.',
                                       'Рыжих М.С.', 'Бутин А.А.', 'Литера', 'Листов'):
-                            self.assertIn(label, lines, lines)
+                            self.assertRegex(text, r'(?<!\S)' + re.escape(label) + r'(?!\S)', lines)
+                    spans = [span for block in page.get_text('dict', clip=region)['blocks']
+                             if 'lines' in block for line in block['lines'] for span in line['spans']]
+                    expected_font = nk.STAMP_FONT.replace(' ', '').upper()
+                    self.assertTrue(all(expected_font in span['font'].replace(' ', '').upper() for span in spans))
+                    code = [span for span in spans if 'ЛР.420200.10.03.01.ПЗ' in span['text']]
+                    self.assertTrue(code)
+                    self.assertTrue(all(abs(span['size'] - 16) < .01 for span in code))
+                    labels = [span for span in spans if 'Изм.' in span['text']]
+                    self.assertTrue(labels)
+                    self.assertTrue(all(abs(span['size'] - 9) < .01 for span in labels))
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), original_hash)
 
 
