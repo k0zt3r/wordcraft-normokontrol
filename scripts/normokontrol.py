@@ -177,6 +177,9 @@ class Wordcraft(AbstractContextManager):
             {"command": "caret.set", "params": {"pos": {"story": "body", "path": path, "off": off}}},
             {"command": "document.layout"}])[-1]
         caret = result["caret"]
+        if caret is None:
+            from runtime import PositionUnavailable
+            raise PositionUnavailable('Wordcraft не возвращает координаты этого абзаца.')
         physical = caret["page"]
         return {"page": physical + 1, "number": result["pages"][physical]["number"],
                 "x": caret["x"], "y": caret["y"], "h": caret["h"]}
@@ -255,6 +258,8 @@ def heading_level(para, styles, numbering=None):
     levels = abstract.get('levels', [])
     if isinstance(index, int) and 0 <= index < len(levels):
         native = levels[index]
+        if native.get('format') == 'bullet':
+            return None  # A copied outline style does not make bullets headings.
         tokens = re.findall(r'%([1-9])', native.get('text', ''))
         if native.get('format') == 'decimal' and tokens and isinstance(level, int) and level < 9:
             return max(map(int, tokens))
@@ -381,8 +386,9 @@ def table_caption(body, index):
 
 
 def normalize_model(model, mode, changes, heading_gap=None):
-    from structure import analyze
+    from structure import analyze, question_indices
     structure = analyze(model)
+    questions = question_indices(model, structure)
     from list_formatting import normalize as normalize_list
     list_cache = {}
     body, styles = model["body"], model.get("styles", {})
@@ -419,9 +425,9 @@ def normalize_model(model, mode, changes, heading_gap=None):
                 if level > 1:
                     # Explicit False also overrides a page break inherited from Heading 1.
                     props["pageBreakBefore"] = False
-                centered = effective_para(model, block).get('align') == 'center'
-                props.update({'align': 'center' if centered else 'left',
-                              'indentFirst': 0.0 if centered else PROFILE['body_indent_mm'] * MM})
+                # §7.2.9 permits centered headings; use the user's chosen
+                # alignment consistently for structural and numbered headings.
+                props.update(align='center', indentFirst=0.0)
                 if level == 1 and i > start and norm(block["text"]) != "содержание":
                     props["pageBreakBefore"] = True
             elif CAPTION.match(norm(block.get("text", ""))):
@@ -441,7 +447,8 @@ def normalize_model(model, mode, changes, heading_gap=None):
                 # Changing an image paragraph's line height can clip its image.
                 props["lineSpacing"] = {"rule": "multiple", "value": 1.0}
                 props["keepNext"] = True
-            normalize_list(model, block, level, list_cache)
+            if i not in questions:
+                normalize_list(model, block, level, list_cache)
             literal_item = NUMBERED_HEADING.match(norm(block.get('text', '')))
             if not level and literal_item and literal_item[2] and '.' not in literal_item[1]:
                 props.update(align='justify', indentFirst=PROFILE['body_indent_mm'] * MM, keepNext=False,
@@ -480,6 +487,14 @@ def normalize_model(model, mode, changes, heading_gap=None):
                 for row in block["rows"]:
                     for cell in row["cells"]:
                         cell.setdefault("props", {})["borders"] = edges.copy()
+                        for _, para in paragraphs(cell['blocks']):
+                            # Template cells must not inherit justified alignment
+                            # or a first-line indent from the source Normal style.
+                            para.setdefault('props', {}).update(
+                                align='left', indentFirst=0.0, indentLeft=0.0, indentRight=0.0,
+                                spaceBefore=0.0, spaceAfter=0.0,
+                                spaceBeforeAuto=False, spaceAfterAuto=False,
+                                keepNext=False, pageBreakBefore=False, outlineLevel=9)
     if mode == "compact":
         if looks_framed(model):
             raise ValueError("В документе обнаружены штампы. Выберите полный профиль: обычные поля сместят текст относительно рамки.")
@@ -657,6 +672,18 @@ def apply_frames(model, metadata, changes, issues):
             for block in body:
                 block.pop('section',None)
             model['lastSection']=title
+    # Give the contents its own section: it needs clearance for the large
+    # first-page stamp, while subsequent body sections use the smaller stamp.
+    toc_tables=detect_tocs(body)
+    if toc_tables and min(toc_tables)>=start:
+        after=max(toc_tables)+1
+        following_index, following=next_block(body,after-1)
+        if following is not None and not (after<len(body) and body[after].get('section')):
+            separator={'kind':'para','text':'','runs':[],'mark':{'size':1.0},
+                       'props':{'spaceBefore':0.0,'spaceAfter':0.0,
+                                'lineSpacing':{'rule':'exactly','value':1.0}},
+                       'section':copy.deepcopy(model['lastSection'])}
+            body.insert(after,separator)
     sections = [(i, b["section"]) for i, b in enumerate(body) if b.get("section")] if start<len(body) else []
     if start<len(body):
         sections.append((len(body), model["lastSection"]))
@@ -672,7 +699,11 @@ def apply_frames(model, metadata, changes, issues):
                         "footers": {"default": blank_footer, "first": blank_footer, "even": blank_footer},
                         "titlePage": True, "marginLeft": 27.5 * MM, "marginRight": 10 * MM,
                         "marginTop": max(section.get("marginTop", 0), 10 * MM),
-                        "marginBottom": 30 * MM, "header": 0.0, "footer": 0.0, "start": "nextPage", "pageW": w, "pageH": h})
+                        # The first body section contains the 40 mm title block
+                        # on its first page. Reserve it in the actual text area,
+                        # not only in overlaid header graphics.
+                        "marginBottom": (50 if section_start == start else 30) * MM,
+                        "header": 0.0, "footer": 0.0, "start": "nextPage", "pageW": w, "pageH": h})
         section_start = end + 1
     # Discard unused old header/textbox stories: stale people's details must not survive in the package.
     reachable = set()
@@ -739,6 +770,13 @@ def add_templates(model, toc_template, bibliography, changes, toc_entries=None, 
                 rows.append(row)
             target["rows"] = rows
             changes.append("Содержание заполнено введёнными строками; страницы пересчитаны для найденных заголовков.")
+        following_index, following = next_block(body, index + 1)
+        if following is not None:
+            if following['kind'] == 'para':
+                following.setdefault('props', {})['pageBreakBefore'] = True
+            else:
+                body.insert(following_index, {'kind':'para','text':'\f','runs':[{'len':1}],
+                                            'props':{'spaceBefore':0.0,'spaceAfter':0.0}})
     if bibliography or bibliography_entries:
         aliases = {"список использованных источников", "библиографический список", "список литературы"}
         index = next((i for i, b in enumerate(body) if b["kind"] == "para" and norm(b.get("text", "")) in aliases), None)
@@ -776,11 +814,16 @@ def body_start(model):
     return next((i + 1 for i, b in enumerate(body) if b.get("section")), 0)
 
 
-def fill_cover(model, metadata, changes):
+def fill_cover(model, metadata, changes, cover_mode='new'):
     metadata = {k: v for k, v in (metadata or {}).items() if v}
     body = model["body"]
-    start = body_start(model)
-    fresh = start == 0
+    if cover_mode not in {'new', 'preserve'}:
+        raise ValueError('Режим титульника: new или preserve.')
+    start = 0 if cover_mode == 'new' else body_start(model)
+    from cover_checks import has_academic_cover
+    fresh = cover_mode == 'new'
+    if not fresh and not has_academic_cover(model):
+        raise ValueError('Существующий титульник не распознан. Выберите «Создать новый титульник первой страницей». Исходный документ сохранится после него.')
     if fresh:
         template = json.loads((Path(__file__).resolve().parent.parent / "assets" / "course-templates.json").read_text(encoding="utf-8"))
         cover = copy.deepcopy(template["title"])
@@ -788,6 +831,7 @@ def fill_cover(model, metadata, changes):
             if paragraph.get("text", "").strip():
                 font(paragraph, PROFILE['text_size'])
         cover[-1]["section"] = copy.deepcopy(model["lastSection"])
+        cover[-1]['section']['landscape'] = False
         body[:0] = cover
         start = len(cover)
         # The user's two manual spacers depend on the source document's styles.
@@ -796,7 +840,7 @@ def fill_cover(model, metadata, changes):
             p.setdefault("props", {}).update({"spaceBefore": 0.0, "spaceAfter": 0.0,
                                               "lineSpacing": {"rule": "exactly", "value": 1.0}})
             p["mark"] = {"font": FONT, "size": 1.0}
-        changes.append("Добавлен титульный лист из курсача; необязательные реквизиты без значений оставлены пустыми.")
+        changes.append("Добавлен новый титульный лист первой страницей; исходный документ целиком сохранён после него. Реквизиты взяты только из ввода, неизвестные оставлены пустыми.")
     def replace(p, text):
         from text_edits import replace as edit
         raw=p.get('text','')
@@ -888,6 +932,7 @@ def fill_cover(model, metadata, changes):
             font(block,14)
             body.insert(department_index+1,block)
             changes.append('Добавлен необязательный гриф допуска к защите (§6.2д). ФИО и регалии взяты только из ввода.')
+    return metadata
 
 
 def add_optional_sections(model, selected, changes):
@@ -1013,9 +1058,11 @@ def repair_layout(wc, model, mode, changes, issues, do_fix=True):
                     add_issue(issues, "figure-layout", f"Рисунок не помещается вместе с подписью: {block['text']}", image_pos["page"])
 
 
-def add_issue(issues, code, message, page=None):
+def add_issue(issues, code, message, page=None, *, path=None):
     from reporting import severity
     item = {"code": code, "message": message, "page": page, 'severity':severity(code)}
+    if path is not None:
+        item['location'] = {'story': 'body', 'path': list(path), 'off': 0}
     if item not in issues:
         issues.append(item)
 
@@ -1155,10 +1202,12 @@ def structural_checks(wc, model, mode, issues, heading_gap=None):
         if block["kind"] != "table" or table_caption(body, i) is None:
             continue
         for ri, row in enumerate(block["rows"]):
+            row_path = next((path for ci, cell in enumerate(row['cells'])
+                             for path, _ in paragraphs(cell['blocks'], (i, ri, ci))), None)
             if (row.get("props", {}).get("height") or 0) < 8 * MM - .1:
-                add_issue(issues, "row-height", f"Для строки {ri + 1} таблицы не задан минимум 8 мм: {body[table_caption(body, i)]['text']}")
+                add_issue(issues, "row-height", f"Для строки {ri + 1} таблицы не задан минимум 8 мм: {body[table_caption(body, i)]['text']}", path=row_path)
             if not row.get("props", {}).get("cantSplit"):
-                add_issue(issues, "row-split", f"Разрешён разрыв строки {ri + 1}: {body[table_caption(body, i)]['text']}")
+                add_issue(issues, "row-split", f"Разрешён разрыв строки {ri + 1}: {body[table_caption(body, i)]['text']}", path=row_path)
     # Font checks resolve inheritance through the native style table below.
     for path, para in paragraphs(body):
         if tuple(path) in automatic_contents:
@@ -1169,17 +1218,17 @@ def structural_checks(wc, model, mode, issues, heading_gap=None):
         if main_text and not has_image(para):
             spacing = effective_para(model, para).get("lineSpacing", {})
             if spacing.get("rule") != "multiple" or abs(spacing.get("value", 0) - PROFILE['line_spacing']) > .01:
-                add_issue(issues, "line-spacing", f"Межстрочный интервал отличается от {PROFILE['line_spacing']}: {para['text'][:100]}")
+                add_issue(issues, "line-spacing", f"Межстрочный интервал отличается от {PROFILE['line_spacing']}: {para['text'][:100]}", path=path)
         for run, run_text in visible_text_runs(para):
             props = effective_char(model, para, run)
             if props.get("bold"):
-                add_issue(issues, "bold", f"Полужирный текст: {para['text'][:100]}")
+                add_issue(issues, "bold", f"Полужирный текст: {para['text'][:100]}", path=path)
             if main_text or (len(path) > 1 and path[0] >= start):
                 if props.get("font") and props["font"] != FONT:
-                    add_issue(issues, "font", f"Шрифт {props['font']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
+                    add_issue(issues, "font", f"Шрифт {props['font']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).", path=path)
                 allowed = (PROFILE['text_size'],) if main_text else (12, PROFILE['text_size'])
                 if props.get("size") and all(abs(props["size"] - size) > .1 for size in allowed):
-                    add_issue(issues, "font-size", f"Кегль {props['size']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).")
+                    add_issue(issues, "font-size", f"Кегль {props['size']} во фрагменте «{run_text[:100]}» (абзац: {para['text'][:100]}).", path=path)
 
 
 def trim_manual_indent(para):
@@ -1276,19 +1325,20 @@ def effective_para(model, para):
 
 
 def write_report(path, report):
-    from reporting import render, render_changes, render_sources
+    from reporting import render, render_changes, render_sources, highlighted_places
     esc = html.escape
-    findings = render(report['issues'])
+    places, previews = highlighted_places(path.parent / report['pdf_name'], report['issues'])
+    findings = render(report['issues'], report['pdf_name'], places)
     changes = render_changes(report['changes'])
     sources = render_sources(report['changes']+[i['message'] for i in report['issues']])
     text = f'''<!doctype html><html lang="ru"><meta charset="utf-8"><title>Нормоконтроль</title>
 <style>body{{font:17px/1.6 system-ui;max-width:950px;margin:40px auto;padding:0 24px;color:#20242b}}
 h1{{font-size:28px}}li{{margin:8px 0}}.note{{background:#f0f3f6;padding:18px;border-radius:10px}}
-a{{color:#1257a4}}small{{color:#596574}}pre{{white-space:pre-wrap;font:inherit;background:#f0f3f6;padding:16px}}article{{scroll-margin-top:24px}}</style>
+a{{color:#1257a4}}small{{color:#596574}}pre{{white-space:pre-wrap;font:inherit;background:#f0f3f6;padding:16px}}article{{scroll-margin-top:24px}}.place img{{max-width:100%;height:auto;border:1px solid #ccd3dc}}.place:target{{outline:3px solid #e0ab00;background:#fffbeb}}.place{{padding:16px;margin:20px 0}}.place-link{{display:block;font-weight:600}}blockquote{{margin:12px 0;padding-left:14px;border-left:3px solid #e0ab00}}</style>
 <h1>Нормоконтроль ИрГУПС</h1><p>{esc(report['input'])}</p>
 <p><a href="{quote(report['docx_name'])}">Открыть DOCX</a> · <a href="{quote(report['pdf_name'])}">Открыть PDF</a></p>
 <p>Страниц: <strong>{report['pages']}</strong>. Профиль: {esc(report['mode'])}. Wordcraft: {esc(report['wordcraft'])}.</p>
-<h2 id="changes">Что сделано</h2>{changes}<h2>Что проверить</h2>{findings}
+<h2 id="changes">Что сделано</h2>{changes}<h2 id="findings">Что проверить</h2>{findings}{previews}
 <p class="note">Это результат автоматической проверки оформления, а не подпись нормоконтролёра.
 Проверьте PDF глазами: титульник, рамки и штампы, рисунки, таблицы, пустые места и последний лист.
 Смысл текста, правильность ФИО и шифра, актуальность источников, порядок приложений и грамматика
@@ -1299,7 +1349,7 @@ a{{color:#1257a4}}small{{color:#596574}}pre{{white-space:pre-wrap;font:inherit;b
 
 def process(source, out=None, mode="full", format_text=True, check_only=False, cli=None, progress=print, metadata=None,
             toc_template=False, bibliography_template=False, toc_entries=None, bibliography_entries=None, optional_sections=None,
-            created_from_template=False, cancel_event=None):
+            created_from_template=False, cancel_event=None, cover_mode='new'):
     from runtime import check_cancel
     check_cancel(cancel_event)
     metadata = prepare_metadata(metadata)
@@ -1348,7 +1398,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             original_pages=len(wc.execute('document.layout')['pages']) if mode=='full' and not check_only else 0
             if not check_only:
                 if mode == "full":
-                    fill_cover(model, metadata, changes)
+                    metadata = fill_cover(model, metadata, changes, cover_mode=cover_mode)
                     from cover_checks import verify_requested,fill_known_fields
                     fill_known_fields(model,metadata,changes)
                     verify_requested(model,metadata,issues)
@@ -1427,6 +1477,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
             # Recheck final table/caption geometry without mutating it.
             repair_layout(wc, final, mode, [], issues, do_fix=False)
             update_toc(wc, final, issues, do_fix=False)
+            from reporting import locate_findings
+            locate_findings(issues, final, wc)
             pages = len(wc.execute("document.layout")["pages"])
         try:
             import pymupdf
@@ -1463,7 +1515,8 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
               "wordcraft": version, "pages": pages, "changes": changes, "issues": issues,
               "docx_name": docx_path.name, "pdf_name": pdf_path.name,
               "automated_only": True, "word_render_verified": False,
-              "output": str(output), "check_only": check_only}
+              "output": str(output), "check_only": check_only,
+              "cover_mode": 'unchanged' if check_only or mode!='full' else cover_mode}
     report['format_profile'] = dict(PROFILE,chapter_gap_pt=heading_gap,subheading_gap_pt=heading_gap)
     from reporting import change_details
     report['change_details']=change_details(changes)
@@ -1485,6 +1538,7 @@ def process(source, out=None, mode="full", format_text=True, check_only=False, c
 
 
 def create_document(out, **options):
+    options['cover_mode']='new'  # A new document has no existing title to preserve.
     cli = find_cli(options.get("cli"))
     with tempfile.TemporaryDirectory(prefix="normokontrol-new-") as folder:
         source = Path(folder) / "Новая работа.docx"
@@ -1507,6 +1561,8 @@ def main():
     parser.add_argument("--mode", choices=("full", "compact"), default="full")
     parser.add_argument("--no-format", action="store_true", help="Сохранить оформление, довести переносы и содержание")
     parser.add_argument("--check-only", action="store_true", help="Не исправлять оформление, поля, переносы и содержание")
+    parser.add_argument('--cover-mode',choices=('new','preserve'),default='new',
+                        help='new: новый титульник перед исходником (по умолчанию); preserve: сохранить существующий')
     parser.add_argument("--wordcraft", help="Путь к wordcraft-cli.exe")
     parser.add_argument("--toc-template", action="store_true", help="Добавить пустую таблицу содержания из курсача")
     parser.add_argument("--bibliography-template", action="store_true", help="Добавить пустую таблицу-заготовку источников")
@@ -1530,6 +1586,7 @@ def main():
         metadata = {field.replace("-", "_"): getattr(args, field.replace("-", "_")) for field in fields}
         metadata.update(generate_code=args.generate_code,include_year=args.include_year,approval=args.approval)
         options = dict(mode=args.mode, format_text=not args.no_format, check_only=args.check_only, cli=args.wordcraft,
+                       cover_mode=args.cover_mode,
                        metadata=metadata, toc_template=args.toc_template, bibliography_template=args.bibliography_template,
                        toc_entries=[s.strip() for s in args.toc_file.read_text(encoding="utf-8-sig").splitlines() if s.strip()] if args.toc_file else None,
                        bibliography_entries=[s.strip() for s in args.bibliography_file.read_text(encoding="utf-8-sig").splitlines() if s.strip()] if args.bibliography_file else None,

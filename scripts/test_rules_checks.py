@@ -11,6 +11,21 @@ def paragraph(text, **props):
 
 
 class RuleTests(unittest.TestCase):
+    def test_contract_clauses_and_bullets_are_not_headings_from_numbers_alone(self):
+        from structure import analyze
+        numbered = {'nums':[{'id':1,'abstractId':1}],
+                    'abstracts':[{'id':1,'levels':[{'format':'bullet','text':'-'}]}]}
+        model={'body':[paragraph('Введение'), paragraph('1.1 Краткий заголовок'),
+               paragraph('1.2. Стороны обязуются обеспечить сохранность всех переданных документов; доступ предоставляется только уполномоченным сотрудникам.'),
+               paragraph('Ссылка на нормативный документ', numbering={'num':1,'level':0}, outlineLevel=1)],
+               'styles':{},'numbering':numbered}
+        structure=analyze(model)
+        self.assertEqual(structure['levels'],{0:1,1:2})
+        before=model['body'][2]['text']
+        from normative import prepare
+        prepare(model,[],[])
+        self.assertEqual(model['body'][2]['text'],before)
+
     def test_native_heading_numbering_overrides_outline(self):
         numbering = {'nums': [{'id': 1, 'abstractId': 4}], 'abstracts': [
             {'id': 4, 'levels': [{'format': 'decimal', 'text': '%1.'},

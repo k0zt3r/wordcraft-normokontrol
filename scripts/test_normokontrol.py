@@ -13,6 +13,244 @@ from irgups_data import generate_number, prepare_metadata, unit_code, UNIVERSITY
 
 
 class NormokontrolTests(unittest.TestCase):
+    def test_cover_policy_new_preserve_and_check_only(self):
+        import pymupdf
+        from docx.enum.section import WD_SECTION
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            doc=Document()
+            original=['Исходный университет', 'Курсовая работа', 'Старый титульный лист', 'Иркутск 2026']
+            for text in original:
+                doc.add_paragraph(text)
+            doc.add_section(WD_SECTION.NEW_PAGE)
+            doc.add_heading('Введение',1)
+            doc.add_paragraph('Авторское содержимое должно сохраниться.')
+            source=folder/'source.docx'
+            doc.save(source)
+            digest=hashlib.sha256(source.read_bytes()).hexdigest()
+            for cover_mode in ('new','preserve'):
+                report=nk.process(source,folder/cover_mode,cover_mode=cover_mode,
+                                  metadata={'title':'Новый титульный лист','author':'Тестов А.А.'},
+                                  progress=lambda _:None)
+                self.assertEqual(report['cover_mode'],cover_mode)
+                result=Document(folder/cover_mode/report['docx_name'])
+                self.assertIn('Авторское содержимое должно сохраниться.',[p.text for p in result.paragraphs])
+                with pymupdf.open(folder/cover_mode/report['pdf_name']) as pdf:
+                    first=pdf[0].get_text()
+                    if cover_mode=='new':
+                        self.assertIn('Новый титульный лист',first)
+                        self.assertNotIn('Старый титульный лист',first)
+                        self.assertTrue(all(text in [p.text for p in result.paragraphs] for text in original))
+                        self.assertNotIn('Литера',first)
+                        self.assertIn('Литера',pdf[1].get_text())
+                    else:
+                        self.assertIn('Старый титульный лист',first)
+                        self.assertEqual(sum('ФЕДЕРАЛЬНОЕ АГЕНТСТВО' in p.get_text() for p in pdf),0)
+                checked=nk.process(source,folder/(cover_mode+'-check'),cover_mode=cover_mode,
+                                   check_only=True,progress=lambda _:None)
+                self.assertEqual(checked['cover_mode'],'unchanged')
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),digest)
+
+    def test_long_contents_cannot_enter_large_stamp_area(self):
+        import pymupdf
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            report=nk.create_document(folder/'out',toc_entries=[f'Проверочный раздел {i}' for i in range(1,33)],
+                                      progress=lambda _:None)
+            with pymupdf.open(folder/'out'/report['pdf_name']) as pdf:
+                page=pdf[1]
+                self.assertIn('Литера',page.get_text())
+                matches=page.search_for('Проверочный раздел')
+                self.assertTrue(matches)
+                self.assertLess(max(rect.y1 for rect in matches),page.rect.height-45*nk.MM)
+
+    def test_contents_is_followed_by_new_page_even_for_plain_introductory_text(self):
+        import pymupdf
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            doc=Document()
+            doc.add_paragraph('Самостоятельный вводный абзац.')
+            doc.add_heading('Введение',1)
+            doc.add_paragraph('Основной текст введения.')
+            source=folder/'source.docx'
+            doc.save(source)
+            report=nk.process(source,folder/'out',toc_entries=['Введение'],progress=lambda _:None)
+            with pymupdf.open(folder/'out'/report['pdf_name']) as pdf:
+                self.assertIn('Содержание',pdf[1].get_text())
+                self.assertNotIn('Самостоятельный вводный абзац.',pdf[1].get_text())
+                self.assertIn('Самостоятельный вводный абзац.',pdf[2].get_text())
+
+    def test_missing_cover_with_incomplete_or_styled_header_is_always_created(self):
+        import pymupdf
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        for heading_style in (False, True):
+            with self.subTest(heading_style=heading_style), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                doc = Document()
+                work = doc.add_paragraph('Лабораторная работа № 12', style='Heading 1' if heading_style else None)
+                work.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                doc.add_paragraph('Цель работы: выполнить проверку.')
+                doc.add_heading('Введение', 1)
+                doc.add_paragraph('Исходный авторский абзац не должен пропасть.')
+                source = folder / 'source.docx'
+                doc.save(source)
+                digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                report = nk.process(source, folder/'out', metadata={'author':'Иванова Анна',
+                                    'group':'ТЕСТ-12','work_type':'Лабораторная работа № 12','title':'Проверка титульного листа',
+                                    'city':'Иркутск','year':'2026'}, progress=lambda _: None)
+                result = Document(folder/'out'/report['docx_name'])
+                texts = [p.text for p in result.paragraphs]
+                self.assertIn('Цель работы: выполнить проверку.', texts)
+                self.assertIn('Исходный авторский абзац не должен пропасть.', texts)
+                self.assertFalse(any(i['code']=='metadata-unapplied' for i in report['issues']))
+                self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
+                with pymupdf.open(folder/'out'/report['pdf_name']) as pdf:
+                    self.assertIn('ФЕДЕРАЛЬНОЕ АГЕНТСТВО', pdf[0].get_text())
+                    self.assertIn('Лабораторная работа № 12', pdf[0].get_text())
+                    self.assertIn('Иванова Анна', pdf[0].get_text())
+                    self.assertNotIn('Цель работы:', pdf[0].get_text())
+                    self.assertIn('Цель работы:', pdf[1].get_text())
+
+    def test_company_document_title_is_kept_after_new_academic_title(self):
+        import pymupdf
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            doc = Document()
+            doc.add_paragraph('Общество с ограниченной ответственностью «Пример»')
+            doc.add_paragraph('УТВЕРЖДАЮ')
+            doc.add_paragraph('Генеральный директор ООО «Пример»')
+            doc.add_paragraph('Модель угроз')
+            doc.add_paragraph('Иркутск 2026')
+            doc.add_heading('Введение', 1)
+            doc.add_paragraph('Текст модели угроз.')
+            source = folder/'source.docx'
+            doc.save(source)
+            report = nk.process(source,folder/'out',metadata={'work_type':'Лабораторная работа'},progress=lambda _:None)
+            result = Document(folder/'out'/report['docx_name'])
+            self.assertIn('Генеральный директор ООО «Пример»', [p.text for p in result.paragraphs])
+            with pymupdf.open(folder/'out'/report['pdf_name']) as pdf:
+                self.assertIn('ФЕДЕРАЛЬНОЕ АГЕНТСТВО', pdf[0].get_text())
+                self.assertNotIn('Генеральный директор', pdf[0].get_text())
+                self.assertIn('Генеральный директор', pdf[1].get_text())
+
+    def test_question_numbers_and_case_survive_formatting_and_checking(self):
+        for native in (False, True):
+            with self.subTest(native=native), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                doc = Document()
+                doc.add_paragraph('Лабораторная работа')
+                doc.add_paragraph('Иркутск 2026')
+                doc.add_heading('Ответы на контрольные вопросы', 1)
+                questions = ['Что требуется проверить?', 'Дать определение термина.']
+                for n, question in enumerate(questions, 10):
+                    doc.add_paragraph(question if native else f'{n}. {question}',
+                                      style='List Number' if native else None)
+                    doc.add_paragraph('Ответ представляет собой самостоятельный абзац.')
+                source = folder / 'source.docx'
+                doc.save(source)
+                for check_only in (False, True):
+                    report = nk.process(source, folder / str(check_only), check_only=check_only,
+                                        progress=lambda _: None)
+                    self.assertFalse(any(i['code'].startswith('list-') for i in report['issues']))
+                    result = Document(folder / str(check_only) / report['docx_name'])
+                    texts = [p.text for p in result.paragraphs]
+                    for n, question in enumerate(questions, 10):
+                        self.assertIn(question if native else f'{n}. {question}', texts)
+                    if native:
+                        with nk.Wordcraft(nk.find_cli()) as wc:
+                            wc.open(folder / str(check_only) / report['docx_name'])
+                            wc.save(folder / 'model.json')
+                        model = json.loads((folder / 'model.json').read_text(encoding='utf-8'))
+                        for p in model['body']:
+                            if p.get('text') in questions:
+                                ref = nk.effective_para(model, p)['numbering']
+                                num = next(n for n in model['numbering']['nums'] if n['id'] == ref['num'])
+                                abstract = next(a for a in model['numbering']['abstracts'] if a['id'] == num['abstractId'])
+                                self.assertEqual(abstract['levels'][ref['level']]['text'], '%1.')
+
+    def test_new_cover_keeps_source_header_and_normalizes_index_tables(self):
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Cm
+        import pymupdf
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            doc = Document()
+            normal = doc.styles['Normal'].paragraph_format
+            normal.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            normal.first_line_indent = Cm(1)
+            doc.add_paragraph('Практическая работа')
+            doc.add_paragraph('Исходная тема SOC')
+            doc.add_paragraph('Выполнил: студент группы БИ.4-23-1 Иванов И. И.')
+            titles = ['Введение', '1 Исходные данные', 'Заключение', 'Список использованных источников']
+            for title in titles[:-1]:
+                doc.add_heading(title, 1)
+                doc.add_paragraph('Авторский текст раздела, который должен сохраниться.')
+            doc.add_heading(titles[-1], 1)
+            doc.add_paragraph('1. Первый источник с URL: https://example.org/source-one')
+            doc.add_paragraph('2. Второй источник с достаточно длинным библиографическим описанием.')
+            source = folder / 'source.docx'
+            doc.save(source)
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            checked = nk.process(source, folder / 'check', check_only=True, progress=lambda _: None)
+            checked_doc = Document(folder / 'check' / checked['docx_name'])
+            self.assertEqual([p.text for p in checked_doc.paragraphs[:3]],
+                             ['Практическая работа', 'Исходная тема SOC',
+                              'Выполнил: студент группы БИ.4-23-1 Иванов И. И.'])
+            report = nk.process(source, folder / 'out', toc_entries=titles,
+                                metadata={'author': 'Петров П. П.', 'group':'ТЕСТ-17', 'title': 'Введённая тема SOC'},
+                                progress=lambda _: None)
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
+            result = Document(folder / 'out' / report['docx_name'])
+            text = '\n'.join(p.text for p in result.paragraphs)
+            self.assertIn('Введённая тема SOC', text)
+            self.assertIn('Исходная тема SOC', text)
+            self.assertEqual(text.count('Авторский текст раздела, который должен сохраниться.'), 3)
+            for title in titles:
+                heading = next(p for p in result.paragraphs if p.text == title)
+                self.assertEqual(heading.alignment, WD_ALIGN_PARAGRAPH.CENTER)
+                self.assertEqual(heading.paragraph_format.first_line_indent.pt, 0)
+            toc = next(t for t in result.tables if len(t.columns) == 4)
+            sources = result.tables[-1]
+            for table in (toc, sources):
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            self.assertEqual(para.alignment, WD_ALIGN_PARAGRAPH.LEFT)
+                            self.assertEqual(para.paragraph_format.first_line_indent.pt, 0)
+            with pymupdf.open(folder / 'out' / report['pdf_name']) as pdf:
+                cover = pdf[0].get_text()
+                self.assertIn('ФЕДЕРАЛЬНОЕ АГЕНТСТВО', cover)
+                self.assertIn('Петров П. П.', cover)
+                self.assertIn('ТЕСТ-17', cover)
+                self.assertNotIn('Иванов И. И.', cover)
+                self.assertIn('Содержание', pdf[1].get_text())
+
+    def test_saved_document_links_distinguish_repeated_colored_paragraphs(self):
+        import tempfile
+        from pathlib import Path
+        from docx import Document
+        from docx.shared import RGBColor
+        from normokontrol import process
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            source = folder / 'source.docx'
+            doc = Document()
+            doc.add_paragraph('Курсовая работа')
+            doc.add_heading('Введение', 1)
+            for _ in range(2):
+                run = doc.add_paragraph('Одинаковый проверяемый абзац.').runs[0]
+                run.font.color.rgb = RGBColor(255, 0, 0)
+            doc.save(source)
+            report = process(source, folder / 'result', check_only=True, progress=lambda _: None)
+            colored = [i for i in report['issues'] if i['code'] == 'text-color'
+                       and i.get('location', {}).get('text') == 'Одинаковый проверяемый абзац.']
+            self.assertEqual(len(colored), 2)
+            self.assertNotEqual(colored[0]['location']['path'], colored[1]['location']['path'])
+            self.assertTrue(all(i['page'] >= 1 for i in colored))
+            html = (folder / 'result/report.html').read_text(encoding='utf-8')
+            self.assertIn('#page=', html)
+            self.assertIn('Открыть страницу PDF', html)
+
     def test_list_abbreviation_dot_survives_wordcraft_roundtrip(self):
         with tempfile.TemporaryDirectory(prefix='list-abbreviation-') as directory:
             folder = Path(directory)
@@ -204,7 +442,7 @@ class NormokontrolTests(unittest.TestCase):
         self.assertEqual(p['runs'], [{'len': 10}])
         model = {'body': [{'kind': 'para', 'text': '\ufffcИркутск 2024', 'objects': [{'type': 'opaque', 'off': 0}]},
                           {'kind': 'para', 'text': 'Введение'}], 'styles': {}}
-        nk.fill_cover(model, {'year': '2026'}, [])
+        nk.fill_cover(model, {'year': '2026'}, [], cover_mode='preserve')
         self.assertEqual(model['body'][0]['text'], '\ufffcИркутск, 2026')
         self.assertEqual(model['body'][0]['objects'][0]['off'], 0)
 

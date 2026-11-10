@@ -109,9 +109,56 @@ def install_edit_shortcuts(root):
     attach(root)
 
 
+def scrollable_form(parent, height, width):
+    """A bounded viewport; labels follow its width and wheel events stay local."""
+    canvas = tk.Canvas(parent, height=height, width=width, highlightthickness=0)
+    scrollbar = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side='right', fill='y')
+    canvas.pack(side='left', fill='both', expand=True)
+    form = ttk.Frame(canvas, padding=2)
+    window = canvas.create_window((0, 0), window=form, anchor='nw')
+    form.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
+
+    def resize(event):
+        canvas.itemconfigure(window, width=event.width)
+        for widget in form.winfo_children():
+            if widget.winfo_class() == 'TLabel' and float(widget.cget('wraplength') or 0):
+                widget.configure(wraplength=max(40, event.width - 16))
+    canvas.bind('<Configure>', resize)
+
+    def wheel(event):
+        # Text widgets already have native scrolling; don't also move the form.
+        widget = event.widget
+        while widget is not None:
+            if widget.winfo_class() == 'Text':
+                return
+            if widget == parent:
+                delta = -1 if event.num == 4 else 1 if event.num == 5 else (
+                    -int(event.delta / 120) or (-1 if event.delta > 0 else 1 if event.delta < 0 else 0))
+                if delta:
+                    canvas.yview_scroll(delta, 'units')
+                return
+            widget = widget.master
+    for sequence in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+        parent.winfo_toplevel().bind(sequence, wheel, add='+')
+    return form
+
+
+def text_editor(parent, height):
+    shell = ttk.Frame(parent)
+    shell.pack(fill='both', expand=True)
+    text = tk.Text(shell, height=height, width=1, wrap='word', undo=True)
+    scrollbar = ttk.Scrollbar(shell, orient='vertical', command=text.yview)
+    text.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side='right', fill='y')
+    text.pack(side='left', fill='both', expand=True)
+    return text
+
+
 def show(process, create_document, initial=None):
     from preferences import load as load_preferences, save as save_preferences, profile_dialog
-    from runtime import ProcessingCancelled
+    from runtime import ProcessingCancelled, open_path
     saved=load_preferences()
     enable_dpi_awareness()
     root = tk.Tk()
@@ -131,6 +178,7 @@ def show(process, create_document, initial=None):
     new = tk.BooleanVar(value=False)
     formatting = tk.BooleanVar(value=True)
     check = tk.BooleanVar(value=False)
+    cover_mode = tk.StringVar(value='new')
     toc_option = tk.BooleanVar(value=False)
     bibliography = tk.BooleanVar(value=False)
     status = tk.StringVar(value="Выберите DOCX или создайте новый документ. Все поля необязательные.")
@@ -162,6 +210,7 @@ def show(process, create_document, initial=None):
             source.set(path)
     def blank():
         new.set(True)
+        cover_mode.set('new')
         source.set("Новый документ — титульник и выбранные заготовки")
     ttk.Label(pane, text="Нормоконтроль ИрГУПС", style='Title.TLabel').grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Entry(pane, textvariable=source).grid(row=1, column=0, sticky="ew", pady=(4, 12))
@@ -177,23 +226,24 @@ def show(process, create_document, initial=None):
     notebook.add(reg_tab, text="Регистрационный номер")
     notebook.add(toc_tab, text="Содержание")
     notebook.add(ref_tab, text="Список литературы")
-    # The title form is taller than a typical laptop window; keep it scrollable.
-    title_shell=title_tab
-    canvas=tk.Canvas(title_shell,height=px(320),width=px(850),highlightthickness=0)
-    scroll=ttk.Scrollbar(title_shell,orient='vertical',command=canvas.yview)
-    canvas.configure(yscrollcommand=scroll.set)
-    scroll.pack(side='right',fill='y')
-    canvas.pack(side='left',fill='both',expand=True)
-    title_tab=ttk.Frame(canvas,padding=2)
-    window=canvas.create_window((0,0),window=title_tab,anchor='nw')
-    title_tab.bind('<Configure>',lambda _:canvas.configure(scrollregion=canvas.bbox('all')))
-    canvas.bind('<Configure>',lambda event:canvas.itemconfigure(window,width=event.width))
-    def scroll_title(event):
-        if notebook.select()==str(title_shell):
-            canvas.yview_scroll(-int(event.delta/120),'units')
-    root.bind('<MouseWheel>',scroll_title,add='+')
-    ttk.Label(title_tab, text="Пустые поля сохраняют исходные данные. Должность заменяется целиком: например, «к.т.н., доцент каф. ИСиЗИ».", wraplength=860).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 12))
+    title_tab, reg_tab, toc_tab, ref_tab = (
+        scrollable_form(tab, px(320), px(850))
+        for tab in (title_tab, reg_tab, toc_tab, ref_tab))
+    ttk.Label(title_tab, text="Новый титульник заполняется из этих полей; неизвестные реквизиты остаются пустыми. При сохранении существующего титульника пустые поля не заменяют исходные значения.", wraplength=860).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 12))
     ttk.Label(title_tab, text=UNIVERSITY_FULL+'\n('+UNIVERSITY_SHORT+')', wraplength=860, foreground='#4b5968').grid(row=1,column=0,columnspan=4,sticky='w',pady=(0,8))
+    cover_controls=ttk.Frame(title_tab)
+    cover_controls.grid(row=2,column=0,columnspan=4,sticky='ew',pady=(0,8))
+    cover_choices=[]
+    for label,value in [('Создать новый титульник первой страницей','new'),
+                        ('Сохранить существующий титульник','preserve')]:
+        choice=ttk.Radiobutton(cover_controls,text=label,variable=cover_mode,value=value)
+        choice.pack(anchor='w')
+        cover_choices.append(choice)
+    def sync_cover_controls(*_):
+        for choice in cover_choices:
+            choice.configure(state='disabled' if check.get() or new.get() else 'normal')
+    check.trace_add('write',sync_cover_controls)
+    new.trace_add('write',sync_cover_controls)
     for n, (key, label) in enumerate(fields):
         row, col = n // 2 + 3, n % 2 * 2
         ttk.Label(title_tab, text=label).grid(row=row, column=col, sticky="w", padx=(10 if col else 0, 8), pady=6)
@@ -272,13 +322,11 @@ def show(process, create_document, initial=None):
     for key,label in (('annotation','Аннотация'),('normative','Нормативные ссылки'),('abbreviations','Обозначения и сокращения')):
         ttk.Checkbutton(toc_tab,text='Добавить заготовку: '+label,variable=extra_sections[key]).pack(anchor='w')
     ttk.Label(toc_tab, text="Можно оставить пустым — получите пустую таблицу. Или введите по одному заголовку на строку, например:\nВведение\n1 Теоретическая часть\n1.1 Основные понятия\nЗаключение\nСписок использованных источников", wraplength=850).pack(anchor="w", pady=10)
-    toc_text = tk.Text(toc_tab, height=9, wrap="word", undo=True)
-    toc_text.pack(fill="both", expand=True)
+    toc_text = text_editor(toc_tab, height=9)
     ttk.Label(toc_tab, text="Номера страниц определятся по существующим заголовкам. Отсутствующие разделы будут отмечены в отчёте.", wraplength=850).pack(anchor="w", pady=(8, 0))
     ttk.Checkbutton(ref_tab, text="Создать список литературы — таблица из курсача", variable=bibliography).pack(anchor="w")
     ttk.Label(ref_tab, text="Без текста — пустая таблица. Для заполнения введите по одному описанию источника на строку.\nНумерация добавляется автоматически, без точки. Не вводите номер перед описанием.", wraplength=850).pack(anchor="w", pady=10)
-    ref_text = tk.Text(ref_tab, height=10, wrap="word", undo=True)
-    ref_text.pack(fill="both", expand=True)
+    ref_text = text_editor(ref_tab, height=10)
     ttk.Label(ref_tab, text="Скрипт оформляет таблицу по нормоконтролю. Недостающих авторов, дат, страниц и адресов он не выдумывает.", wraplength=850).pack(anchor="w", pady=(8, 0))
     ttk.Label(pane, text="Рамки: точные стыки, 0,75 пт по §7.1.2. Исходный файл не изменяется.", foreground="#596574").grid(row=6, column=0, columnspan=3, sticky="w", pady=(12, 0))
     bar = ttk.Progressbar(pane, mode="indeterminate")
@@ -303,6 +351,7 @@ def show(process, create_document, initial=None):
             out = Path(selected) / f"Новая_работа_{datetime.now():%Y%m%d_%H%M%S}"
         input_path = source.get()
         options = dict(format_text=formatting.get(), check_only=check.get(), metadata={k: v.get().strip() for k, v in details.items()},
+                       cover_mode=cover_mode.get(),
                        toc_template=toc_option.get(), bibliography_template=bibliography.get(),
                        toc_entries=[s.strip() for s in toc_text.get("1.0", "end").splitlines() if s.strip()],
                        bibliography_entries=[s.strip() for s in ref_text.get("1.0", "end").splitlines() if s.strip()])
@@ -343,7 +392,7 @@ def show(process, create_document, initial=None):
         if last_result:
             path=Path(last_result['output'])
             try:
-                os.startfile(str(path))
+                open_path(path)
             except OSError as error:
                 messagebox.showerror('Открыть папку',str(error),parent=root)
     folder_button=ttk.Button(actions,text='Открыть папку',command=open_result_folder,state='disabled')
@@ -383,7 +432,7 @@ def show(process, create_document, initial=None):
                         folder_button.configure(state='normal')
                         status.set(f"Готово. {value['pages']} стр., замечаний: {len(value['issues'])}.")
                         try:
-                            os.startfile(str(Path(value["output"]) / "report.html"))
+                            open_path(Path(value["output"]) / "report.html")
                         except OSError as error:
                             status.set(f'Готово. Отчёт сохранён в {value["output"]}. Не удалось открыть: {error}')
         except queue.Empty:

@@ -3,6 +3,44 @@ from collections import Counter
 import html
 import json
 from pathlib import Path
+from urllib.parse import quote
+
+
+def build_batch(root):
+    """One entry point to the actual agent-generated results of any corpus."""
+    root=Path(root).resolve()
+    inventory=json.loads((root/'inventory.json').read_text(encoding='utf-8'))
+    results=json.loads((root/'summary.json').read_text(encoding='utf-8'))
+    supporting=json.loads((root/'supporting-results.json').read_text(encoding='utf-8'))
+    rows=[]
+    def link(path,label):
+        target=Path(path).resolve().relative_to(root).as_posix()
+        return f'<a href="{quote(target)}">{html.escape(label)}</a>'
+    for item in inventory:
+        runs=[r for r in results if r['sha256']==item['sha256']]
+        cells=[]
+        for scenario in ('check','format'):
+            run=next((r for r in runs if r['scenario']==scenario),None)
+            if not run:
+                cells.append('<td>Не запускалось</td>')
+            elif run['status']!='ok':
+                cells.append('<td>Ошибка: '+html.escape(run.get('error',run['status']))+'</td>')
+            else:
+                files=run['artifacts']
+                value=' · '.join(link(files[k],label) for k,label in
+                                 [('report_html','Отчёт'),('docx','DOCX'),('pdf','PDF')])
+                title=('; учебный титульник найден на первой странице' if run.get('institutional_title') else '; учебный титульник не подтверждён') if scenario=='format' else ''
+                cells.append(f'<td>{value}<br>{run["pages"]} стр.; замечаний: {sum(run["issues"].values())}{title}</td>')
+        rows.append('<tr><td>'+html.escape(item['path'])+'</td>'+''.join(cells)+'</tr>')
+    extras=''.join('<li>'+html.escape(item['path'])+' — '+html.escape(item['status'])+
+                   (f', {item["pages"]} стр.' if 'pages' in item else '')+'</li>' for item in supporting)
+    text='''<!doctype html><html lang="ru"><meta charset="utf-8"><title>Пакетная проверка документов</title>
+<style>body{font:16px/1.5 system-ui;max-width:1400px;margin:30px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccd3dc;padding:12px;text-align:left;overflow-wrap:anywhere}a{color:#1257a4}</style>
+<h1>Пакетная проверка штатным скриптом</h1>
+<p>Все Word-документы обработаны через общий агентный API: отдельно проверка и отдельно оформление. Исходники и прежние результаты не изменены; контрольные суммы сверены. Техническое завершение не подтверждает отсутствие замечаний.</p>
+<p>Недостающие реквизиты не выдумываются. Исходные вводные абзацы и собственные титулы служебных документов сохраняются после нового учебного титульника. В PDF и схемах выполнена проверка чтения; нормоконтроль этой программы принимает DOCX.</p>
+<table><tr><th>Исходник</th><th>Проверить</th><th>Оформить</th></tr>'''
+    (root/'index.html').write_text(text+''.join(rows)+'</table><h2>Дополнительные файлы</h2><ul>'+extras+'</ul></html>',encoding='utf-8')
 
 
 def build(root):

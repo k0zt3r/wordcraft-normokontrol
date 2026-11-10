@@ -6,6 +6,31 @@ from test_rules_checks import paragraph as p
 
 
 class SimpleListTests(unittest.TestCase):
+    def test_terminal_edit_detects_format_changes_outside_replacement(self):
+        from list_checks import _terminal_edit
+        from text_edits import replace
+        from unittest.mock import patch
+        source = p('Длинный пункт списка. Конец')
+        source['runs'][0]['propertiesForTest'] = {'language': 'ru'}
+
+        def corrupt(candidate, *args):
+            result = replace(candidate, *args)
+            candidate['runs'][0]['propertiesForTest']['language'] = 'en'
+            return result
+        with patch('text_edits.replace', side_effect=corrupt):
+            with self.assertRaisesRegex(RuntimeError, 'форматирование'):
+                _terminal_edit(source, 19, 20, ';')
+        self.assertEqual(source['runs'][0]['propertiesForTest']['language'], 'ru')
+
+    def test_terminal_edit_preserves_split_unicode_styles(self):
+        from list_checks import _terminal_edit
+        source = p('первый пункт.хвост')
+        source['runs'] = [{'len': len(text.encode()), 'props': {'italic': italic}}
+                          for text, italic in [('первый ', True), ('пункт', True), ('.', False), ('хвост', True)]]
+        updated = _terminal_edit(source, 12, 13, ';')
+        self.assertEqual(updated['text'], 'первый пункт;хвост')
+        self.assertEqual(updated['runs'][-1], source['runs'][-1])
+
     def simple(self, entries=None):
         return model([p('Необходимо выполнить:')] + (entries or [item('первое действие.'), item('второе действие;')]))
 

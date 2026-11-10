@@ -9,7 +9,7 @@
 ![Windows](https://img.shields.io/badge/Windows_10%2F11-x64-0078D4)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-**[Скачать установщик EXE](https://github.com/k0zt3r/wordcraft-normokontrol/releases/latest/download/Normokontrol-1.5.0-windows-x64-setup.exe)** · **[Все выпуски](https://github.com/k0zt3r/wordcraft-normokontrol/releases)**
+**[Скачать установщик EXE](https://github.com/k0zt3r/wordcraft-normokontrol/releases/latest)** · **[Все выпуски](https://github.com/k0zt3r/wordcraft-normokontrol/releases)**
 
 Версия **1.5.0** · [Что изменилось](references/changelog.md)
 

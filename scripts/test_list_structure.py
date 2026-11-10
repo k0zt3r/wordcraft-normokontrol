@@ -16,6 +16,28 @@ def item(text,depth=0,num=24):
 
 
 class ListStructureTests(unittest.TestCase):
+    def test_questions_are_not_enumerations_and_real_lists_still_are(self):
+        from list_checks import format_simple
+        from structure import question_indices
+        for marker in ('10.', '10)'):
+            doc = model([p('Ответы на контрольные вопросы', outlineLevel=1),
+                         p(marker + ' Что следует проверить?'), p('Самостоятельный ответ.'),
+                         p('11. Дать определение термина.'), p('Определение термина.'),
+                         p('12. Зачем нужен контроль?'), p('Контроль необходим.'),
+                         p('Примеры мер:'), p('- проверка'), p('- обучение'),
+                         p('Заключение'), p('Проверьте:'), p('1. первый пункт'), p('2. второй пункт')])
+            questions = question_indices(doc)
+            self.assertEqual(questions, {2, 4, 6})
+            before = copy.deepcopy(doc)
+            format_simple(doc, [], [])
+            self.assertEqual(doc['body'][2], before['body'][2])
+            self.assertEqual(doc['body'][4], before['body'][4])
+            issues = []
+            process(doc, [], issues)
+            self.assertFalse(any('Что следует' in i['message'] or 'Дать определение' in i['message']
+                                 or 'Зачем нужен' in i['message'] for i in issues))
+            self.assertTrue(any(i['code'] == 'list-marker' and 'первый пункт' in i['message'] for i in issues))
+
     def test_flat_efimova_group_is_reviewed_without_text_edits(self):
         doc=model([item('Регулярное обучение. Обучение должно включать:'),
                    item('Основы безопасности информации. Объяснение принципов.'),

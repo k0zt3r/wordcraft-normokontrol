@@ -5,6 +5,23 @@ import re
 CITY_YEAR = re.compile(r'^[А-ЯЁA-Z][А-Яа-яЁёA-Za-z .-]*?[,]?\s+(?:19|20)\d{2}(?:\s*г\.?)?$')
 
 
+def work_type_name(text):
+    from normokontrol import norm
+    return re.sub(r'\s*№\s*\d+\s*$', '', norm(text))
+
+
+def has_academic_cover(model):
+    """A heading boundary alone is not evidence of an existing title page."""
+    from normokontrol import body_start, paragraphs, norm
+    from structure import cover_end
+    end = body_start(model)
+    text = ' '.join(norm(p.get('text', '')) for _, p in paragraphs(model['body'][:end]))
+    if any(label in text for label in ('университет', 'фгбоу', 'факультет', 'кафедра')):
+        return True
+    corporate = any(label in text for label in ('общество с ограниченной', 'генеральный директор', 'ооо «'))
+    return cover_end(model) is not None and not corporate
+
+
 def verify_requested(model, metadata, issues):
     from normokontrol import body_start,paragraphs,norm,add_issue
     text=' '.join(norm(p.get('text','')) for _,p in paragraphs(model['body'][:body_start(model)]))
@@ -50,7 +67,8 @@ def inspect(model, issues):
     start=body_start(model)
     cover=list(paragraphs(model['body'][:start]))
     titles={norm(t) for t in WORK_TYPES.values()}
-    kinds=[p for _,p in cover if norm(p.get('text','')) in titles]
+    titles.update(('практическая работа', 'практическое занятие', 'лабораторная работа'))
+    kinds=[p for _,p in cover if work_type_name(p.get('text','')) in titles]
     if any(norm(p.get('text',''))=='курсовая работа' for p in kinds) and not any('к защите допускаю' in norm(p.get('text','')) for _,p in cover):
         add_issue(issues,'cover-approval','Сверьте необходимость грифа допуска с кафедральным образцом: §6.2д содержит оговорку о выпускающих кафедрах и курсовых работах. Отсутствие грифа само по себе не признано ошибкой любой курсовой; данные не выдумываются.')
     if not kinds:
@@ -71,7 +89,7 @@ def format_cover(model, changes):
     from format_profile import PROFILE
     from irgups_data import WORK_TYPES
     start=body_start(model)
-    kinds={norm(t) for t in WORK_TYPES.values()}
+    kinds={norm(t) for t in WORK_TYPES.values()} | {'практическая работа', 'практическое занятие', 'лабораторная работа'}
     for path,p in paragraphs(model['body'][:start]):
         # Imported title spacers can contain page breaks and bookmark anchors.
         # There is one cover section boundary; internal title page breaks duplicate it.
@@ -97,7 +115,7 @@ def format_cover(model, changes):
             props['spaceAfter']=PROFILE['cover_department_gap_pt']
         if text.startswith('факультет'):
             props['spaceBefore']=12.0
-        if text in kinds:
+        if work_type_name(text) in kinds:
             props.update(spaceBefore=24.0,spaceAfter=12.0)
             raw=p['text']
             index=next((i for i,c in enumerate(raw) if c.isalpha()),None)

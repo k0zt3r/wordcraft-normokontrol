@@ -1,11 +1,20 @@
 """Validated formatting values; local overrides survive program updates."""
 import json
 import hashlib
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PATH = ROOT / 'assets' / 'format-profile.json'
-LOCAL_PATH = ROOT / '.normokontrol-profile.json'
+def user_file(name):
+    """System packages are read-only; portable copies retain local settings."""
+    if (ROOT / '.normokontrol-deb').exists():
+        base = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
+        return base / 'wordcraft-normokontrol' / name
+    return ROOT / name
+
+
+LOCAL_PATH = user_file('.normokontrol-profile.json')
 BOUNDS = {'text_size': (10,24), 'line_spacing': (1,3), 'body_indent_mm': (0,30),
           'compact_indent_mm': (0,30), 'chapter_gap_pt': (0,72), 'subheading_gap_pt': (0,72),
           'stamp_size': (4,24), 'stamp_code_size': (4,24), 'frame_stroke_pt': (.1,3),

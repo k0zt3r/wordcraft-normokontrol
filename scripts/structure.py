@@ -2,12 +2,64 @@
 import re
 
 
+def question_indices(model, structure=None):
+    """Numbered questions are not syntactic enumerations under §7.2.7.
+
+    Question marks are explicit evidence. Imperative prompts additionally
+    need a question-section heading and a following unnumbered answer.
+    """
+    from normokontrol import norm, effective_para
+    structure = structure if structure is not None else analyze(model)
+    levels, body = structure['levels'], model['body']
+    section, result = None, set()
+    section_name = re.compile(r'^(?:ответы на )?(?:(?:контрольные|проверочные) )?вопросы(?: для (?:самопроверки|самоконтроля))?$')
+    marker = re.compile(r'^\s*\d+[.)]\s+')
+    numbering = model.get('numbering', {})
+    nums = {n['id']: n for n in numbering.get('nums', [])}
+    abstracts = {a['id']: a for a in numbering.get('abstracts', [])}
+
+    def numbered(para):
+        if marker.match(para.get('text', '')):
+            return True
+        ref = effective_para(model, para).get('numbering') or {}
+        abstract = abstracts.get(nums.get(ref.get('num'), {}).get('abstractId'), {})
+        definitions = abstract.get('levels', [])
+        return ref.get('level', 0) == 0 and bool(definitions) and definitions[0].get('format') == 'decimal'
+
+    for i, para in enumerate(body):
+        if para.get('kind') != 'para':
+            continue
+        text = norm(para.get('text', ''))
+        name = re.sub(r'^\d+(?:\.\d+)*[.)]?\s+', '', text)
+        if section_name.fullmatch(name):
+            section = levels.get(i, 1)
+            continue
+        if numbered(para) and '?' in text:
+            result.add(i)
+            continue
+        if i in levels and section is not None and levels[i] <= section:
+            section = None
+        if section is not None and numbered(para):
+            following = next(((j, b) for j, b in enumerate(body[i+1:], i+1)
+                              if b.get('kind') != 'para' or norm(b.get('text', ''))), None)
+            if following:
+                j, answer = following
+                if answer.get('kind') == 'para' and j not in levels and not numbered(answer):
+                    result.add(i)
+    return result
+
+
 def cover_end(model):
     """Use the city/year as a boundary, not the first heading several sheets later."""
     from normokontrol import norm, paragraphs, SPECIAL
     body=model['body']
     city=re.compile(r'^[а-яёa-z][а-яёa-z .-]*?,?\s+(?:19|20)\d{2}(?:\s*г\.?)?$')
+    institutional = False
     for i,block in enumerate(body[:100]):
+        texts=[norm(p.get('text','')) for _,p in paragraphs([block])]
+        institutional = institutional or any('университет' in text or 'фгбоу' in text for text in texts)
+        if institutional and block.get('section'):
+            return i+1  # Explicit title boundary works even when city/year are blank.
         if block['kind']=='para' and norm(block.get('text','')) in SPECIAL:
             return None
         if any(city.fullmatch(norm(p.get('text',''))) for _,p in paragraphs([block])):
@@ -42,6 +94,16 @@ def analyze(model):
         level = heading_level(p, styles, numbering)
         props = effective_para(model, p)
         manual = NUMBERED_HEADING.match(text)
+        if (manual and '.' in manual[1] and
+                (props.get('outlineLevel') is None or props['outlineLevel'] >= 9)):
+            content = text[manual.end(1):].lstrip('. ')
+            prose = (len(content) > 140 or re.search(r'[;!?]|[.!?]\s+\S', content)
+                     or (content.endswith('.') and len(content.split()) > 10))
+            if prose:
+                # §7.2.9 permits numbered clauses without headings. Do not
+                # promote contractual prose to a chapter solely from its number.
+                uncertain.append(i)
+                continue
         chapter = re.match(r'^глава\s+(\d+)(?:[.\s:–—-]|$)', text)
         if manual and '.' not in manual[1] and (props.get('outlineLevel') is None or props['outlineLevel'] >= 9):
             number = int(manual[1])

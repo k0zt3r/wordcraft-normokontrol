@@ -50,17 +50,30 @@ def _terminal_edit(para, start, end, ending):
         raise RuntimeError('Исправление окончания перечисления изменило защищённый текст.')
     # Byte styles before and after the planned span must be identical. Run
     # splitting is permitted; changing their formatting metadata is not.
-    def styles(p):
+    def styles(p, begin, end):
+        # Compare clipped style spans, coalescing equal neighbours. Expanding
+        # one dictionary reference per UTF-8 byte wastes memory on long items.
         result = []
+        offset = 0
         for run in p.get('runs', []):
+            stop = offset + run['len']
+            length = max(0, min(stop, end) - max(offset, begin))
+            offset = stop
+            if not length:
+                continue
             meta = {k: v for k, v in run.items() if k != 'len'}
-            result.extend([meta] * run['len'])
+            if result and result[-1][1] == meta:
+                result[-1][0] += length
+            else:
+                result.append([length, meta])
         return result
     lo, hi = len(old[:start].encode('utf-8')), len(old[:end].encode('utf-8'))
-    old_styles, new_styles = styles(para), styles(candidate)
+    old_size = len(old.encode('utf-8'))
+    new_size = len(expected.encode('utf-8'))
     added = len(ending.encode('utf-8'))
-    if (len(new_styles) != len(expected.encode('utf-8'))
-            or old_styles[:lo] != new_styles[:lo] or old_styles[hi:] != new_styles[lo + added:]):
+    if (sum(run['len'] for run in candidate.get('runs', [])) != new_size
+            or styles(para, 0, lo) != styles(candidate, 0, lo)
+            or styles(para, hi, old_size) != styles(candidate, lo + added, new_size)):
         raise RuntimeError('Исправление окончания перечисления изменило форматирование текста.')
     expected_objects = copy.deepcopy(para.get('objects', []))
     delta = added - (hi - lo)
@@ -78,13 +91,13 @@ def _terminal_edit(para, start, end, ending):
 def format_simple(model, changes, issues, check_only=False):
     """Format explicit items independently; preserve levels and protected objects."""
     from normokontrol import body_start, auto_toc_text, norm
-    from structure import analyze
+    from structure import analyze, question_indices
     if check_only:
         return
     body = model['body']
     start = body_start(model)
     structure = analyze(model)
-    excluded = set(structure['toc']) | set(structure['levels']) | {p[0] for p in auto_toc_text(body)}
+    excluded = set(structure['toc']) | set(structure['levels']) | {p[0] for p in auto_toc_text(body)} | question_indices(model, structure)
     clusters, current = [], []
     for i, p in enumerate(body):
         if i < start:
@@ -160,12 +173,12 @@ def format_simple(model, changes, issues, check_only=False):
 def process(model, changes, issues, check_only=False):
     """Both modes report suggestions; native marker formatting happens elsewhere."""
     from normokontrol import body_start, effective_para, effective_char, visible_text_runs, norm, add_issue, auto_toc_text
-    from structure import analyze
+    from structure import analyze, question_indices
     structure = analyze(model)
     body = model['body']
     start = body_start(model)
     numbering = model.get('numbering', {})
-    excluded = set(structure['toc']) | {path[0] for path in auto_toc_text(body)}
+    excluded = set(structure['toc']) | {path[0] for path in auto_toc_text(body)} | question_indices(model, structure)
     clusters, current = [], []
 
     def finish():
@@ -204,10 +217,10 @@ def process(model, changes, issues, check_only=False):
         content = MARKER.sub('', visible, count=1) if manual else visible
         runs = list(visible_text_runs(p))
         if runs and all(effective_char(model, p, r).get('italic') for r, _ in runs):
-            add_issue(issues, 'list-italic-review', f'Весь пункт выделен курсивом: проверьте обоснованность по §7.1.3 и приложению Д: {visible[:100]}')
+            add_issue(issues, 'list-italic-review', f'Весь пункт выделен курсивом: проверьте обоснованность по §7.1.3 и приложению Д: {visible[:100]}', path=[i])
         if ((native and native.get('format') == 'decimal' and not native.get('text', '').endswith(')'))
                 or (manual and re.match(r'^\s*\d+\.\s+', visible))):
-            add_issue(issues, 'list-marker', f'Проверьте цифровой маркер перечисления: по §7.2.7 используют номер со скобкой. Текст не изменён: {visible[:100]}')
+            add_issue(issues, 'list-marker', f'Проверьте цифровой маркер перечисления: по §7.2.7 используют номер со скобкой. Текст не изменён: {visible[:100]}', path=[i])
         current.append({'index': i, 'depth': depth, 'content': content, 'group': group})
     finish()
 
@@ -225,7 +238,7 @@ def process(model, changes, issues, check_only=False):
         for k, item in enumerate(cluster):
             i, depth, content = item['index'], item['depth'], item['content']
             if content and content[0].isupper() and not initial_abbreviation(content):
-                add_issue(issues, 'list-case-review', f'Проверьте начало пункта перечисления по приложению Д: строчная буква зависит от конструкции; имена собственные сохраняются. Текст не изменён: {content[:100]}')
+                add_issue(issues, 'list-case-review', f'Проверьте начало пункта перечисления по приложению Д: строчная буква зависит от конструкции; имена собственные сохраняются. Текст не изменён: {content[:100]}', path=[i])
             if content.endswith(':'):
                 following = cluster[k + 1:]
                 if following and following[0]['depth'] == depth:
@@ -249,6 +262,6 @@ def process(model, changes, issues, check_only=False):
             ending = ';' if following else '.'
             # Full sentences may legitimately be independent list items.
             if re.search(r'[.!?]\s+\S', content):
-                add_issue(issues, 'list-punctuation-review', f'Пункт содержит несколько предложений: проверьте оформление и окончание по приложению Д; ожидаемая пунктуация зависит от структуры. Текст не изменён: {content[:100]}')
+                add_issue(issues, 'list-punctuation-review', f'Пункт содержит несколько предложений: проверьте оформление и окончание по приложению Д; ожидаемая пунктуация зависит от структуры. Текст не изменён: {content[:100]}', path=[i])
             elif content and not content.rstrip().endswith(ending):
-                add_issue(issues, 'list-punctuation', f'Проверьте окончание пункта перечисления: для связанного перечисления здесь ожидается «{ending}». Текст не изменён: {content[:100]}')
+                add_issue(issues, 'list-punctuation', f'Проверьте окончание пункта перечисления: для связанного перечисления здесь ожидается «{ending}». Текст не изменён: {content[:100]}', path=[i])

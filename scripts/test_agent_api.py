@@ -22,6 +22,7 @@ class AgentAPITests(unittest.TestCase):
             ('create_document', {'out': 'out', 'metadata': {'year': 2026}}),
             ('create_document', {'out': 'out', 'metadata': {'unknown': 'value'}}),
             ('create_document', {'out': 'out', 'optional_sections': ['unknown']}),
+            ('format_document', {'input':'a.docx','out':'out','cover_mode':'guess'}),
         ]:
             with self.subTest(name=name, arguments=arguments), patch.object(api, '_engine') as engine:
                 result = api.invoke(name, arguments)
@@ -113,6 +114,10 @@ class AgentAPITests(unittest.TestCase):
                 self.assertFalse(repeat['ok'])
                 self.assertEqual(before, {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in before})
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
+            preserved=api.invoke('format_document', {'input':str(source), 'out':str(folder/'preserved'),
+                                                   'cover_mode':'preserve'})
+            self.assertTrue(preserved['ok'],preserved['error'])
+            self.assertEqual(preserved['data']['report']['cover_mode'],'preserve')
 
     def test_real_create_template(self):
         try:

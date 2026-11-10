@@ -101,7 +101,7 @@ class CoverListTests(unittest.TestCase):
             doc.add_heading('1 Глава',1);doc.add_paragraph('Текст главы.')
             doc.add_heading('Содержание',1);doc.add_table(rows=1,cols=4)
             source=root/'source.docx';doc.save(source)
-            report=nk.process(source,root/'out',progress=lambda _:None)
+            report=nk.process(source,root/'out',cover_mode='preserve',progress=lambda _:None)
             result=Document(root/'out'/report['docx_name'])
             self.assertIn('Курсовая работа',[x.text for x in result.paragraphs])
             with pymupdf.open(root/'out'/report['pdf_name']) as pdf:

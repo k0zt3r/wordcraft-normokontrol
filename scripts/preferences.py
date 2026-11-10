@@ -2,9 +2,9 @@
 import json
 from pathlib import Path
 from atomic_files import write_json
-from format_profile import ROOT, LOCAL_PATH, PROFILE, validate
+from format_profile import ROOT, LOCAL_PATH, PROFILE, validate, user_file
 
-SETTINGS_PATH=ROOT/'.normokontrol-settings.json'
+SETTINGS_PATH=user_file('.normokontrol-settings.json')
 
 
 def load(path=SETTINGS_PATH):

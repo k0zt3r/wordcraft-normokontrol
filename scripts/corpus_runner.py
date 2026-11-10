@@ -16,7 +16,7 @@ ROOT=Path(__file__).resolve().parent.parent
 
 
 def describe(path):
-    result={'path':str(path.relative_to(ROOT)),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
+    result={'path':str(path.relative_to(ROOT) if path.is_relative_to(ROOT) else path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
             'size':path.stat().st_size}
     if path.suffix.lower()!='.docx':
         result['format']='unsupported'
@@ -34,19 +34,26 @@ def describe(path):
 
 
 def worker(source, folder, scenario):
-    import normokontrol as nk
+    from agent_api import invoke
     folder=Path(folder)
     result={'scenario':scenario,'source':str(source)}
     start=time.perf_counter()
     try:
-        options={'check_only':scenario=='check'}
+        options={'input':str(source),'out':str(folder/'result')}
         if scenario=='metadata':
             options['metadata']={'author':'Иванов И.И.','group':'ТЕСТ.1-26-1','supervisor':'Петров П.П.',
                 'supervisor_title':'доцент','title':'Проверка замены реквизитов','discipline':'Тестовая дисциплина',
                 'city':'Иркутск','year':'2026','code':'КР.420200.10.03.01.ПЗ'}
-        report=nk.process(source,folder/'result',progress=lambda _:None,**options)
+        response=invoke('check_document' if scenario=='check' else 'format_document',options)
+        if not response['ok']:
+            raise RuntimeError(response['error']['message'])
+        report=response['data']['report']
         result.update(status='ok',pages=report['pages'],issues=Counter(i['code'] for i in report['issues']),
-                      changes=len(report['changes']))
+                      changes=len(report['changes']),artifacts=response['data']['artifacts'])
+        import pymupdf
+        with pymupdf.open(response['data']['artifacts']['pdf']) as pdf:
+            title=pdf[0].get_text().casefold()
+            result['institutional_title']='университет' in title and ('выполнил' in title or 'студент' in title)
         if scenario=='metadata':
             result['unapplied_fields']=[i['message'] for i in report['issues'] if i['code']=='metadata-unapplied']
     except Exception as error:
@@ -79,6 +86,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--worker',nargs=3)
     parser.add_argument('--out',type=Path)
+    parser.add_argument('--input-root',type=Path,action='append',help='Scan this directory recursively; repeat for multiple roots.')
     parser.add_argument('--scenarios',nargs='+',default=['check','format'])
     parser.add_argument('--jobs',type=int,default=2)
     parser.add_argument('--timeout',type=int,default=120)
@@ -87,9 +95,43 @@ def main():
         worker(Path(args.worker[0]),Path(args.worker[1]),args.worker[2]);return
     if not args.out:
         parser.error('--out is required')
+    if args.jobs<1 or args.timeout<=0:
+        parser.error('--jobs and --timeout must be positive')
     args.out.mkdir(parents=True,exist_ok=False)
-    paths=sorted(p for name in ('2 курс 1 сем','2 курс 2 сем') for p in (ROOT/name).rglob('*')
-                 if p.is_file() and p.suffix.lower() in {'.docx','.doc','.docm','.dotx'} and not p.name.startswith('~$'))
+    from agent_api import invoke
+    environment={'capabilities':invoke('get_capabilities'),'doctor':invoke('doctor')}
+    (args.out/'environment.json').write_text(json.dumps(environment,ensure_ascii=False,indent=2),encoding='utf-8')
+    if not environment['doctor']['ok'] or not environment['doctor']['data']['ready']:
+        raise RuntimeError('Environment is not ready; see environment.json')
+    roots=[p.resolve() for p in (args.input_root or [ROOT/name for name in ('2 курс 1 сем','2 курс 2 сем')])]
+    if any(not root.is_dir() for root in roots):
+        parser.error('Every --input-root must be an existing directory.')
+    def generated(path, root):
+        return path.resolve().is_relative_to(args.out.resolve()) or any(
+            (parent/'report.json').is_file() or ((parent/'inventory.json').is_file() and (parent/'summary.json').is_file())
+            for parent in path.parents if parent==root or root in parent.parents)
+    all_paths=sorted(set(p.resolve() for root in roots for p in root.rglob('*')
+                        if p.is_file() and not generated(p,root.resolve()) and not p.name.startswith('~$')))
+    paths=[p for p in all_paths if p.suffix.lower() in {'.docx','.doc','.docm','.dotx'}]
+    (args.out/'supporting-files.json').write_text(json.dumps([str(p) for p in all_paths if p not in paths],ensure_ascii=False,indent=2),encoding='utf-8')
+    supporting=[]
+    for path in all_paths:
+        if path in paths:
+            continue
+        item={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
+              'kind':path.suffix.lower(),'status':'not_processed'}
+        try:
+            if path.suffix.lower()=='.pdf':
+                import pymupdf
+                with pymupdf.open(path) as pdf:
+                    item.update(status='readable' if not pdf.needs_pass else 'password_required',pages=len(pdf))
+            elif path.suffix.lower()=='.drawio':
+                ET.parse(path)
+                item['status']='xml_readable'
+        except Exception as error:
+            item.update(status='error',error=str(error))
+        supporting.append(item)
+    (args.out/'supporting-results.json').write_text(json.dumps(supporting,ensure_ascii=False,indent=2),encoding='utf-8')
     inventory=[describe(p) for p in paths]
     groups={}
     for path,item in zip(paths,inventory):
@@ -108,6 +150,9 @@ def main():
             (args.out/'summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
             print(f"{len(results)}/{len(futures)} {scenario} {outcome['status']} {outcome.get('error','')[:140]}",flush=True)
     assert all(hashlib.sha256(p.read_bytes()).hexdigest()==item['sha256'] for p,item in zip(paths,inventory))
+    assert all(hashlib.sha256(Path(item['path']).read_bytes()).hexdigest()==item['sha256'] for item in supporting)
+    from corpus_report import build_batch
+    build_batch(args.out)
     print('Original hashes verified. Unique files:',len(groups),flush=True)
 
 

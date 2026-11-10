@@ -41,25 +41,25 @@ def check_rules(model, mode, issues, heading_gap=None):
         level = structure['levels'].get(path[0]) if len(path) == 1 else None
         if level:
             if level == 1 and abs((props.get('spaceAfter') or 0) - (heading_gap if heading_gap is not None else PROFILE['chapter_gap_pt'])) > .1:
-                add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}')
+                add_issue(issues, 'heading-spacing', f'Проверьте два интервала после заголовка (приложение Е): {text}', path=path)
             if level > 1:
                 if abs((props.get('spaceAfter') or 0) - (heading_gap if heading_gap is not None else PROFILE['subheading_gap_pt'])) > .1:
-                    add_issue(issues, 'subheading-spacing', f'Проверьте расстояние между заголовком и текстом по общему правилу приложения Е (два интервала): {text}')
+                    add_issue(issues, 'subheading-spacing', f'Проверьте расстояние между заголовком и текстом по общему правилу приложения Е (два интервала): {text}', path=path)
                 if props.get('pageBreakBefore'):
-                    add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}')
+                    add_issue(issues, 'subheading-page-break', f'Перед подразделом задан принудительный переход на новую страницу; §7.2.10 требует его только для разделов: {text}', path=path)
             match = NUMBERED_HEADING.match(text)
             number = structure['numbers'].get(path[0])
             if number:
                 if match and match[2]:
-                    add_issue(issues, 'heading-number-dot', f'Точка после номера заголовка (§7.2.2): {text}')
+                    add_issue(issues, 'heading-number-dot', f'Точка после номера заголовка (§7.2.2): {text}', path=path)
                 if number in headings:
-                    add_issue(issues, 'heading-number', f'Повтор номера раздела: {".".join(map(str,number))}.')
+                    add_issue(issues, 'heading-number', f'Повтор номера раздела: {".".join(map(str,number))}.', path=path)
                 parent = number[:-1]
                 previous = counters.get(parent, 0)
                 if number[-1] != previous + 1:
-                    add_issue(issues, 'heading-sequence', f'Проверьте последовательность разделов (§7.2): {text}')
+                    add_issue(issues, 'heading-sequence', f'Проверьте последовательность разделов (§7.2): {text}', path=path)
                 if parent and parent not in headings:
-                    add_issue(issues, 'heading-parent', f'Не найден родительский раздел: {text}')
+                    add_issue(issues, 'heading-parent', f'Не найден родительский раздел: {text}', path=path)
                 counters[parent] = number[-1]
                 headings.add(number)
             appendix = re.fullmatch(r'приложение\s+([а-яёa-z]|\d+)', norm(text))
@@ -71,12 +71,12 @@ def check_rules(model, mode, issues, heading_gap=None):
             if not props.get('numbering') and not re.search(r'[\n\t{}=;]|https?://|^(?:sudo |for |if |def |class )', text):
                 expected = PROFILE['body_indent_mm' if mode == 'full' else 'compact_indent_mm'] * MM
                 if abs((props.get('indentFirst') or 0) - expected) > .5:
-                    add_issue(issues, 'paragraph-indent', f'Абзацный отступ отличается от {10 if mode == "full" else 12.5} мм (§7.1.4): {text[:100]}')
+                    add_issue(issues, 'paragraph-indent', f'Абзацный отступ отличается от {10 if mode == "full" else 12.5} мм (§7.1.4): {text[:100]}', path=path)
         for run, visible in visible_text_runs(para):
             color = effective_char(model, para, run).get('color')
             # Theme/automatic colors cannot be inferred safely from their token.
             if isinstance(color, dict) and 'Rgb' in color and color['Rgb'] != [0, 0, 0]:
-                add_issue(issues, 'text-color', f'Цвет текста отличается от чёрного (§7.1.3): {visible[:100]}')
+                add_issue(issues, 'text-color', f'Цвет текста отличается от чёрного (§7.1.3): {visible[:100]}', path=path)
     if mode != 'full':
         return
     for index in structure['uncertain']:

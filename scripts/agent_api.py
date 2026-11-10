@@ -62,6 +62,7 @@ COMMON = {
 FORMAT = {
     **COMMON,
     'format_text': dict(BOOL, description='По умолчанию true. false сохраняет оформление текста, но разрешает исправления переносов и полей.'),
+    'cover_mode': {'type':'string','enum':['new','preserve'],'description':'В полном режиме new по умолчанию: новый титульник перед целым исходным документом; preserve: сохранить распознанный существующий титульник.'},
     'metadata': METADATA,
     'toc_template': BOOL, 'bibliography_template': BOOL,
     'toc_entries': {'type': 'array', 'items': STRING},
@@ -115,8 +116,23 @@ def _validate(value, schema, path='arguments'):
 
 def _font_check(font_name='Times New Roman'):
     if os.name != 'nt':
-        return {'ok': False, 'family': font_name,
-                'detail': f'Автоматическое обнаружение {font_name} доступно только в Windows; нужна ручная проверка.'}
+        import subprocess
+        try:
+            found = []
+            for style in ('Regular', 'Italic'):
+                result = subprocess.run(
+                    ['fc-match', '-f', '%{family}\n%{style}\n%{file}\n', f'{font_name}:style={style}'],
+                    capture_output=True, text=True, encoding='utf-8', timeout=10, check=True)
+                lines = result.stdout.splitlines()
+                if len(lines) < 3 or font_name.casefold() not in {s.strip().casefold() for s in lines[0].split(',')}:
+                    raise ValueError(f'Fontconfig подставляет другой шрифт вместо {font_name} {style}.')
+                if style == 'Italic' and not any(s in lines[1].casefold() for s in ('italic', 'oblique')):
+                    raise ValueError(f'Не найден {font_name} Italic.')
+                found.append({'name': lines[0] + ' ' + lines[1], 'file': lines[2]})
+            return {'ok': True, 'family': font_name, 'fonts': found,
+                    'detail': 'Семейство проверено через Fontconfig; подстановка дополнительно проверяется в PDF.'}
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            return {'ok': False, 'family': font_name, 'detail': str(error)}
     import winreg
     import pymupdf
     family = ''.join(c for c in font_name.casefold() if c.isalnum())

@@ -47,6 +47,8 @@ def version(text):
 
 def check(root=ROOT):
     root = Path(root)
+    if (root / '.normokontrol-deb').exists():
+        raise ValueError('Обновите DEB-пакет через apt или установите новый .deb из выпуска проекта.')
     if (root / '.normokontrol-installed.json').exists():
         return check_installer(root)
     commit = json.loads(fetch(f'https://api.github.com/repos/{REPO}/commits/main'))['sha']
@@ -264,6 +266,9 @@ def show_updates(root, busy):
     import queue
     import threading
     from tkinter import messagebox
+    if (ROOT / '.normokontrol-deb').exists():
+        messagebox.showinfo('Обновления', 'Установите новый .deb из выпуска проекта через apt. Настройки пользователя сохраняются.', parent=root)
+        return
     if busy():
         messagebox.showinfo('Обновления', 'Дождитесь завершения обработки документа.', parent=root)
         return
